@@ -1,0 +1,14 @@
+{
+  "name": "pi-code",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pi Code — a Claude Code-style AI coding desktop app built on pi + nsh",
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "nsh run App.tsx",
+    "check": "nsh check",
+    "test": "nsh test",
+    "build": "nsh build App.tsx"
+  }
+}

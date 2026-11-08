@@ -1,0 +1,14 @@
+{
+  "name": "pi-code-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "JSONL bridge between the Pi Code nsh app and pi-coding-agent 0.74.2",
+  "type": "module",
+  "main": "bridge.mjs",
+  "scripts": {
+    "test": "node test-bridge.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.74.2"
+  }
+}
