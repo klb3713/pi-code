@@ -44,6 +44,44 @@ node server/test-bridge.mjs   # bridge 独立端到端测试
 
 首次启动会连接本地 bridge：如果 pi 没有可用模型，会自动进入 **Demo 模式**，可以直接输入「创建一个 hello.ts 并打印 Hello」体验真实工具调用与文件变更。
 
+### 在浏览器中运行（Web）
+
+浏览器无法创建本机子进程。Web 版保留相同 UI，通过本机 WebSocket 服务连接 Node bridge / pi；不是无需后端的纯静态应用。
+
+```bash
+# 首次运行或更新依赖后
+npm run setup
+
+# 一个命令同时启动本机 bridge 与 Web UI，保持此终端运行
+npm run dev:web
+# 等同于 node scripts/dev-web.mjs
+```
+
+打开 `http://127.0.0.1:8790/`（或 `http://localhost:8790/`）。一键启动会先启动 bridge 再启动 nsh，按 **Ctrl+C** 同时停止两者；nsh 意外退出也会关闭 bridge。8787 或 8790 已被占用时会提示并退出，不会主动替换或杀掉已有服务。一键命令使用固定端口，不接受额外参数。
+
+仍可分开运行：终端 1 执行 `npm run bridge:web`，终端 2 执行 `npm run dev:web:ui`（即 `nsh run App.tsx --target web`）。
+
+bridge 固定只监听本机 `ws://127.0.0.1:8787/bridge`，不开放局域网；每个页面连接拥有独立 bridge / pi 进程，关闭页面后清理对应进程，其他页面不受影响。
+
+- **工作区是 Node 所在机器的真实路径**，不是浏览器 OPFS 路径。Web 版会话数据默认保存在 `~/.pi-code`；不会把浏览器的 `/app-data` 发给 Node。桌面端仍使用原有 nsh 数据目录，两者默认不共享会话库。
+- **真实模型的环境变量要设在执行 `npm run dev:web` 的同一个终端**；启动器及其 bridge 会继承它们。分开运行时则设置在 `bridge:web` 所在终端。浏览器不会读取本机 API Key。
+- **Origin 检查**默认只允许上面两个页面来源。自定义 UI 端口时，例如 `nsh run App.tsx --target web --port 8791`，先在终端 1 设置 `PI_CODE_BRIDGE_ORIGINS=http://127.0.0.1:8791,http://localhost:8791` 再启动 bridge。此变量替换默认白名单；只加入你信任的本机页面，不支持通配符。
+- 若修改 bridge 端口，需同时调整 web transport URL 与 `nsh.json` 的 network 授权；只改服务端端口不会自动通知前端。
+- `WebSocket 连接失败`：检查启动终端是否报错、8787 是否被占用、页面来源是否在白名单中；分开运行时确认 `bridge:web` 已启动。Origin 被拒绝时服务端 stderr 会显示具体来源。启动服务后刷新浏览器即可重连。
+
+验证命令：
+
+```bash
+npm run check
+npm test
+npm run test:bridge   # stdio 与 WS 的真实 pi / mock LLM 集成测试
+npm run test:web      # 自动启动临时 WS 服务，再跑 nsh --target web
+npm run test:macos    # 在真正的 macOS host 上验证桌面连接
+npm run test:launcher # 一键启动、Ctrl+C 清理、端口冲突与 UI 退出回归
+```
+
+`test:web` 需要本机 Chrome / Edge / Chromium，并独占 8787；先停止 `dev:web` 或手动启动的 `bridge:web`。`test:launcher` 需要 8787 / 8790 都空闲。测试专用服务仅在运行期间允许随机端口的 loopback 页面来源，正常 `bridge:web` 的白名单不变。
+
 ### 使用自定义 OpenAI 兼容网关（推荐）
 
 Pi Code 支持任意 OpenAI 兼容网关。bridge 会读取 `OPENAI_BASE_URL`，自动请求 `${OPENAI_BASE_URL}/models`，把返回的模型注册为 pi 的 `openai-gateway` provider：
@@ -88,7 +126,8 @@ Pi Code 也复用 pi 的原生 provider 配置。可以设置 `ANTHROPIC_API_KEY
 
 - **UI 与运行时解耦**：nsh 应用只依赖 `app/protocol.ts` 定义的 JSONL 协议，不直接依赖 pi 的 API；bridge 可以独立测试（`server/test-bridge.mjs`）。
 - **Demo 仍是真实 agent**：Demo 模式让 pi 指向本地 mock LLM，工具调用、文件写入、会话记录全部由 pi 真实执行。
-- **安全边界**：nsh 的 `capabilities` 只授权 `process.execute: ["node"]` 与工作区所需文件读写；pi 子进程以当前用户权限运行（与 Claude Code / pi CLI 的本地 agent 模型一致）。
+- **Web 传输**：`app/bridge-web.ts` → `ws://127.0.0.1:8787/bridge` → `server/websocket-server.mjs` → 每连接独立的 `server/bridge.mjs`。桌面仍使用 stdio 子进程，协议保持一致。
+- **安全边界**：nsh 的 `capabilities` 授权 `process.execute: ["node"]`、所需文件读写以及仅本机 8787 `/bridge` 的网络访问；WS 服务只绑定 loopback，校验浏览器 Origin。pi 子进程以当前用户权限运行（与 Claude Code / pi CLI 的本地 agent 模型一致）。本机非浏览器客户端可连接，Origin 不是对本机其他进程的身份认证。
 
 更多细节见 [docs/SPEC.md](docs/SPEC.md)（协议、状态机、视觉规范、nsh 使用约定）。
 
@@ -100,7 +139,8 @@ app/
   App.tsx               根组件（标题栏 / 三栏布局 / 快捷键）
   protocol.ts           bridge JSONL 协议类型
   store.ts              全局 signals、事件归约、actions
-  bridge-client.ts      nsh 侧 bridge 子进程客户端
+  bridge-client.ts      桌面 stdio 子进程客户端
+  bridge-web.ts         浏览器 WebSocket transport
   components/
     shell/              TitleBar / Sidebar / StatusBar
     chat/               ChatView / MessageRow / ToolCard / Composer / Welcome
@@ -111,7 +151,10 @@ server/
   pi-session.mjs        pi RPC 子进程封装与事件归一化
   mock-llm.mjs          OpenAI-compatible Demo 模型（SSE）
   workspace.mjs         文件树 / 读取 / git / diff
-  test-bridge.mjs       bridge 端到端自测（11 项）
+  websocket-server.mjs  loopback WS → 独立 bridge 子进程
+  test-bridge.mjs       stdio bridge 端到端自测
+  test-websocket.mjs    WS 协议 / Origin / 生命周期自测
+  test-targets.mjs      真正 web / macOS host 的启动验证
 scripts/setup.mjs       安装 server 依赖、生成本机路径
 tests/                  nsh 测试（fake transport + 真实 e2e）
 theme.json              Claude 风格深色主题 tokens

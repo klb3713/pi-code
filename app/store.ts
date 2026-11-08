@@ -1,8 +1,10 @@
 // Application state for Pi Code. One reactive store, reduced from bridge events.
 import { computed, signal, Storage } from "nsh";
+import { isAvailable as isDesktop } from "nsh/desktop";
 import process from "process";
 import fs from "fs/promises";
 import { bridge as realBridge } from "./bridge-client";
+import { webBridge } from "./bridge-web";
 import { DEFAULT_WORKSPACE } from "./local-config";
 import {
   emptyUsage,
@@ -85,7 +87,8 @@ export interface SettingsState {
 export const phase = signal<Phase>("booting");
 export const connection = signal<Connection>("connecting");
 export const bootError = signal("");
-export const workspace = signal(DEFAULT_WORKSPACE || process.env.HOME || "");
+const defaultWorkspace = DEFAULT_WORKSPACE || (isDesktop ? process.env.HOME : "") || "";
+export const workspace = signal(defaultWorkspace);
 export const runMode = signal<"demo" | "real">("demo");
 export const piVersion = signal("");
 export const models = signal<ModelInfo[]>([]);
@@ -124,7 +127,7 @@ export const sessionTitle = computed(() => {
 });
 
 export const settings = signal<SettingsState>({
-  workspace: DEFAULT_WORKSPACE || process.env.HOME || "",
+  workspace: defaultWorkspace,
   mode: "auto",
   modelKey: "",
   thinking: "off",
@@ -256,7 +259,7 @@ export interface BridgeTransport {
   stop(silent?: boolean): void;
 }
 
-let transport: BridgeTransport = realBridge;
+let transport: BridgeTransport = isDesktop ? realBridge : webBridge;
 
 /** Test seam: swap the transport without spawning node. */
 export function setTransport(next: BridgeTransport): void {
@@ -502,7 +505,8 @@ async function boot(ws: string, mode: RunMode, clear = true): Promise<void> {
     transport.start(ws, mode);
     const response = await transport.request(
       "init",
-      { workspace: ws, mode, dataDir: process.dataDir ?? "" },
+      // The browser's /app-data is OPFS, not an absolute path on the Node host.
+      { workspace: ws, mode, dataDir: isDesktop ? process.dataDir ?? "" : "" },
       120_000,
     );
     if (!response.success) throw new Error(response.error ?? "bridge init 失败");
@@ -541,10 +545,11 @@ export async function bootstrap(): Promise<void> {
   const storedMode = (await Storage.getItem("pi-code.mode").catch(() => null)) as RunMode | null;
   const storedThinking = (await Storage.getItem("pi-code.thinking").catch(() => null)) as ThinkingLevel | null;
   const storedModel = await Storage.getItem("pi-code.model").catch(() => null);
-  let ws = storedWorkspace || DEFAULT_WORKSPACE || process.env.HOME || "";
-  if (storedWorkspace && storedWorkspace !== DEFAULT_WORKSPACE) {
+  let ws = storedWorkspace || defaultWorkspace;
+  // Browser fs is OPFS, not the Node host's filesystem. Validate it in the bridge.
+  if (isDesktop && storedWorkspace && storedWorkspace !== DEFAULT_WORKSPACE) {
     const stillThere = await fs.exists(storedWorkspace).catch(() => false);
-    if (!stillThere) ws = DEFAULT_WORKSPACE || process.env.HOME || "";
+    if (!stillThere) ws = defaultWorkspace;
   }
   const mode: RunMode = storedMode === "demo" || storedMode === "real" ? storedMode : "auto";
   settings.set({ ...settings(), workspace: ws, mode, thinking: storedThinking ?? "off", modelKey: storedModel ?? "" });

@@ -3,7 +3,7 @@
 Pi Code 是一个 Claude Code 桌面版风格的 AI coding 应用：
 - **UI**：nsh 0.4 TSX（原生桌面视图，macOS 优先，全部用 `nsh` / `nsh/base` 组件与 Tailwind 4 类）。
 - **Agent**：pi（`@earendil-works/pi-coding-agent`，固定 1.5.0），以 `pi --mode rpc` 子进程运行完整 agent loop（read/write/edit/bash 工具、会话、流式输出）。
-- **桥接**：Node 进程 `server/bridge.mjs`，由 nsh 应用通过 `process.spawn("node", [...])` 启动，stdin/stdout 走 JSONL 协议。
+- **桥接**：桌面使用 `process.spawn("node", [...])` 启动 `server/bridge.mjs`，stdin/stdout 走 JSONL；浏览器使用 `app/bridge-web.ts` 连接 `ws://127.0.0.1:8787/bridge`，由 `server/websocket-server.mjs` 为每个连接启动独立 bridge。WS 服务只绑定 loopback，默认只接受 `http://127.0.0.1:8790` / `http://localhost:8790` 浏览器来源，完整启动方式见 README 的 Web 章节。Web init 不传 OPFS `/app-data` 给 Node，默认会话数据保存在本机 `~/.pi-code`。
 - **Demo 模型**：没有配置真实 provider 时，bridge 启动本地 OpenAI-compatible mock LLM（`server/mock-llm.mjs`），pi 仍然跑真实 agent loop 与工具调用，仅模型回复来自本地脚本。UI 明确标注「Demo 模型」。
 
 当前目录即工程根目录。`nsh.json`、`theme.json` 已就绪。

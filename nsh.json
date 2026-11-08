@@ -25,6 +25,17 @@
     }
   },
   "capabilities": {
+    "network": {
+      "http": [
+        {
+          "host": "127.0.0.1",
+          "port": 8787,
+          "schemes": ["http", "ws"],
+          "methods": ["GET"],
+          "paths": ["/bridge"]
+        }
+      ]
+    },
     "process": {
       "execute": [
         "node"

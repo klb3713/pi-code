@@ -7,8 +7,15 @@
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "dev": "nsh run App.tsx",
+    "dev:web": "node scripts/dev-web.mjs",
+    "dev:web:ui": "nsh run App.tsx --target web",
+    "bridge:web": "node server/websocket-server.mjs",
     "check": "nsh check",
     "test": "nsh test",
+    "test:bridge": "node server/test-bridge.mjs && node server/test-websocket.mjs",
+    "test:web": "node server/test-targets.mjs web",
+    "test:macos": "node server/test-targets.mjs macos",
+    "test:launcher": "node --test scripts/dev-web.test.mjs",
     "build": "nsh build App.tsx"
   }
 }
