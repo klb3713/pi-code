@@ -251,6 +251,11 @@ export async function gitStatus(root) {
     // failing the whole UI panel.
     return { changes: [] };
   }
+  // `git status` prints paths relative to the repository root even when the
+  // workspace is a subdirectory of it. Strip that prefix so every path the app
+  // exposes is workspace-relative.
+  const prefixResult = await runGit(root, ["rev-parse", "--show-prefix"]);
+  const prefix = prefixResult.ok ? prefixResult.stdout.trim() : "";
   const changes = [];
   for (const line of result.stdout.split("\n")) {
     if (!line.trim()) continue;
@@ -262,6 +267,13 @@ export async function gitStatus(root) {
     if (filePath.startsWith('"') && filePath.endsWith('"')) {
       filePath = filePath.slice(1, -1);
     }
+    if (prefix) {
+      // Entries outside the workspace (a tag agent working in a subdirectory
+      // does not see them) are dropped, and the rest become workspace paths.
+      if (!filePath.startsWith(prefix)) continue;
+      filePath = filePath.slice(prefix.length);
+    }
+    if (!filePath) continue;
     changes.push({ path: filePath, status });
   }
   const branch = await gitBranch(root);
@@ -293,11 +305,11 @@ export async function getDiff(root, requestedPath) {
 
   const tracked = await isTracked(root, id);
   if (tracked) {
-    let result = await runGit(root, ["diff", "HEAD", "--", id]);
+    let result = await runGit(root, ["diff", "HEAD", "--relative", "--", id]);
     if (!result.ok) {
       // Repositories without a first commit: show staged + unstaged changes.
-      result = await runGit(root, ["diff", "--cached", "--", id]);
-      if (result.ok && !result.stdout) result = await runGit(root, ["diff", "--", id]);
+      result = await runGit(root, ["diff", "--cached", "--relative", "--", id]);
+      if (result.ok && !result.stdout) result = await runGit(root, ["diff", "--relative", "--", id]);
     }
     const patch = result.stdout;
     if (patch.includes("Binary files") || patch.includes("GIT binary patch")) {
@@ -308,7 +320,7 @@ export async function getDiff(root, requestedPath) {
 
   // Untracked (or deleted-and-untracked) file: show the whole content.
   if (!stat || !stat.isFile()) {
-    const result = await runGit(root, ["diff", "HEAD", "--", id]);
+    const result = await runGit(root, ["diff", "HEAD", "--relative", "--", id]);
     if (result.ok && result.stdout) return { path: id, patch: result.stdout, language };
     throw new Error(`文件不存在：${requestedPath}`);
   }

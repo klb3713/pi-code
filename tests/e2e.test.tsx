@@ -1,4 +1,4 @@
-// End-to-end test: real bridge + pi 0.74.2 agent loop + the local mock LLM.
+// End-to-end test: real bridge + pi 1.5.0 agent loop + the local mock LLM.
 //
 // The workspace is a throwaway directory inside the project (pluginDir), reset
 // outside the test run. pi really runs: it calls the write tool against the

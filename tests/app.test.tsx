@@ -45,7 +45,7 @@ test("欢迎页：空会话展示建议卡片与三栏布局骨架", async () =>
   expect(app.texts()).toContain("变更");
   expect(app.shows("text:设置")).toBe(true);
   expect(hasText(app, "Pi Demo 1")).toBe(true);
-  expect(hasText(app, "pi 0.74.2")).toBe(true);
+  expect(hasText(app, "pi 1.5.0")).toBe(true);
 }, 60000);
 
 test("发送消息：用户消息、流式助手回复与工具卡片完成", async () => {

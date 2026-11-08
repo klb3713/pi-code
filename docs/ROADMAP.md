@@ -19,7 +19,7 @@
 
 ### Phase 0 · 技术调研（Lead）
 - [x] nsh 0.4 能力盘点：TSX、signals、Tailwind 4、`nsh/base`（Tree/DiffView/TextView/Dialog/Select）、`process.spawn`、`fs/promises`、`net`。
-- [x] pi 0.74.2 调研：`--mode rpc` JSONL 协议、事件类型、内置工具、custom provider / `PI_CODING_AGENT_DIR`、session 文件格式。
+- [x] pi 1.5.0 调研：`--mode rpc` JSONL 协议、事件类型、内置工具、custom provider / `PI_CODING_AGENT_DIR`、session 文件格式。
 - [x] 关键验证：nsh headless test 中 `process.spawn` 双向 stdin/stdout 可用；pi + 本地 mock OpenAI 服务可完成 write 工具调用。
 - [x] 架构决策：nsh UI ↔ Node bridge（JSONL）↔ pi RPC；Demo 模式让 pi 指向本地 mock LLM（agent loop 保持真实）。
 
@@ -62,6 +62,15 @@
 - [x] 真实 bridge + pi + Mock 模型端到端跑通（创建 hello.ts、工具卡、Diff）。
 - [x] `nsh check`、`nsh build App.tsx`。
 - [x] `nsh test` 全量：19/19 PASS（headless 与 `--target macos`）。
+
+### Phase 6.1 · 依赖升级（pi 1.5.0）
+- [x] pi 0.74.2 → 1.5.0；Node 22.17 → 26.13（LTS）。
+- [x] 运行生命周期改用 `agent_settled`（含 2s 兜底），一次 run 只发一次 `agent_end`。
+- [x] 工具耗时采用 pi 上报的 `durationMs`。
+- [x] 停止时先 `clear_queue` 再 `abort`（对齐 pi 的 Esc 行为）。
+- [x] 新增 bridge `get_state` 命令。
+- [x] 修复嵌套工作区（git 子目录）下 `git_status` 路径为仓库根相对的问题。
+- [x] Bridge 自测 13/13、`nsh test` 19/19（headless 与 `--target macos`）、网关实测通过。
 
 ### Phase 6 · 交付
 - [x] README（功能、架构、启动、路线图、限制）。

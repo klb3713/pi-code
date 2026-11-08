@@ -14,11 +14,15 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { gitStatus, getDiff } from "./workspace.mjs";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE_PATH = path.join(HERE, "bridge.mjs");
 
 const results = [];
 let failures = 0;
+/** Event range of the first prompt run, used by the lifecycle check. */
+let firstRun = null;
 
 function pass(name, detail = "") {
   results.push({ ok: true, name, detail });
@@ -213,7 +217,7 @@ async function main() {
       const data = initResponse.data;
       assert(data.demo === true, "init.data.demo 应为 true");
       assert(data.mode === "demo", `mode 应为 demo，实际 ${data.mode}`);
-      assert(data.piVersion === "0.74.2", `piVersion 应为 0.74.2，实际 ${data.piVersion}`);
+      assert(data.piVersion === "1.5.0", `piVersion 应为 1.5.0，实际 ${data.piVersion}`);
       assert(data.workspace === workspace, "workspace 不匹配");
       assert(Array.isArray(data.models) && data.models.length >= 1, "models 为空");
       assert(
@@ -252,6 +256,10 @@ async function main() {
         { since, timeoutMs: 60_000, label: "tool_end(write)" },
       );
       assert(toolEnd.isError === false, "write 工具返回错误");
+      assert(
+        Number.isFinite(toolEnd.durationMs) && toolEnd.durationMs >= 0,
+        `tool_end 应带 durationMs，实际 ${JSON.stringify(toolEnd.durationMs)}`,
+      );
 
       const messageEnd = await client.waitFor(
         (event) =>
@@ -276,7 +284,52 @@ async function main() {
         .slice(since)
         .filter((event) => event.type === "assistant_delta" && event.kind === "text");
       assert(deltas.length > 0, "没有收到 assistant_delta 文本增量");
+      firstRun = { start: since, end: client.events.length };
       return `tool_start/tool_end/message_end/agent_end 全部收到，${deltas.length} 个文本 delta`;
+    });
+
+    // ── abort ────────────────────────────────────────────────────────────
+    await check("abort stops a running prompt", async () => {
+      const since = client.since();
+      const prompt = await client.request(
+        "prompt",
+        { message: "给我讲讲这个项目，随便说点长的内容就好" },
+        30_000,
+      );
+      assert(prompt.success, `prompt 失败：${prompt.error}`);
+      // Let the streamed reply start before interrupting it.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      const abort = await client.request("abort", {}, 30_000);
+      assert(abort.success, `abort 失败：${abort.error}`);
+
+      const end = await client.waitFor((event) => event.type === "agent_end", {
+        since,
+        timeoutMs: 60_000,
+        label: "agent_end(after abort)",
+      });
+      assert(end.aborted === true, "abort 后的 agent_end 应带 aborted=true");
+
+      const state = await client.request("get_state", {}, 20_000);
+      assert(state.data?.isStreaming === false, "abort 后 isStreaming 应为 false");
+      return "agent_end aborted=true, isStreaming=false";
+    });
+
+    // ── run lifecycle (agent_settled) ────────────────────────────────────
+    await check("run lifecycle (agent_end once, session idle after settle)", async () => {
+      // Everything before this check happened in one run; a retried run must not
+      // report extra agent_end events (the bridge waits for `agent_settled`).
+      assert(firstRun, "首个 run 的事件范围未记录");
+      const ends = client.events
+        .slice(firstRun.start, firstRun.end)
+        .filter((event) => event.type === "agent_end");
+      assert(ends.length === 1, `一次 run 应只发一次 agent_end，实际 ${ends.length}`);
+      assert(!client.events.some((event) => event.type === "agent_settled"), "内部 agent_settled 不应泄漏给 UI");
+
+      const state = await client.request("get_state", {}, 20_000);
+      assert(state.success, `get_state 失败：${state.error}`);
+      assert(state.data?.isStreaming === false, "run 结束后 isStreaming 应为 false");
+      return `agent_end=${ends.length}, isStreaming=${state.data?.isStreaming}`;
     });
 
     await check("protocol event size stays bounded", async () => {
@@ -334,6 +387,28 @@ async function main() {
     });
 
     // ── get_diff (untracked) ────────────────────────────────────────────
+    // ── nested workspace (git paths stay workspace-relative) ────────────
+    await check("git_status in a nested workspace keeps paths relative", async () => {
+      const sub = path.join(workspace, "packages", "inner");
+      await fs.mkdir(sub, { recursive: true });
+      await fs.writeFile(path.join(sub, "inside.txt"), "tracked in sub\n", "utf8");
+      git(workspace, ["add", "packages/inner/inside.txt"]);
+      git(workspace, ["commit", "-m", "add nested file"]);
+      await fs.writeFile(path.join(sub, "inside.txt"), "changed in sub\n", "utf8");
+
+      const status = await gitStatus(sub);
+      const paths = status.changes.map((change) => change.path);
+      assert(paths.includes("inside.txt"), `嵌套工作区应报告 inside.txt，实际 ${JSON.stringify(paths)}`);
+      assert(
+        !paths.some((p) => p.startsWith("packages/")),
+        `嵌套工作区的路径不应相对仓库根：${JSON.stringify(paths)}`,
+      );
+
+      const diff = await getDiff(sub, "inside.txt");
+      assert(diff.patch?.includes("inside.txt"), "嵌套工作区的 getDiff 应返回补丁");
+      return `changes=${paths.join(",")}`;
+    });
+
     await check("get_diff (untracked file)", async () => {
       const response = await client.request("get_diff", { path: "hello.md" });
       assert(response.success, `get_diff 失败：${response.error}`);

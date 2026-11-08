@@ -612,6 +612,18 @@ const commands = {
     const mapped = mapModel(model) ?? mapModel(state.model);
     return { ...(mapped ? { model: mapped } : {}), thinkingLevel: state.thinkingLevel ?? "off" };
   },
+  async get_state() {
+    const session = bridge.requireSession();
+    const state = await session.getState();
+    const mapped = mapModel(state.model);
+    return {
+      isStreaming: Boolean(state.isStreaming),
+      isCompacting: Boolean(state.isCompacting),
+      thinkingLevel: state.thinkingLevel ?? "off",
+      messageCount: Number(state.messageCount ?? 0),
+      ...(mapped ? { model: mapped } : {}),
+    };
+  },
   async set_thinking(request) {
     const session = bridge.requireSession();
     const level = String(request.level ?? "");

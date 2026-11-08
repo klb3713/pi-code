@@ -265,7 +265,7 @@ test("ready event fills connection, models, workspace and settings", () => {
       workspace: "/tmp/pi-code-test-workspace",
       mode: "demo",
       demo: true,
-      piVersion: "0.74.2",
+      piVersion: "1.5.0",
       models: [
         {
           provider: "pi-demo",
@@ -351,7 +351,7 @@ test("applySettings applies a model change without reconnecting", async () => {
       workspace: "/tmp/pi-code-demo",
       mode: "demo",
       demo: true,
-      piVersion: "0.74.2",
+      piVersion: "1.5.0",
       models: [
         { provider: "pi-demo", id: "pi-demo-1", name: "Pi Demo 1" },
         { provider: "pi-demo", id: "pi-demo-2", name: "Pi Demo 2" },

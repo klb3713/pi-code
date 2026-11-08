@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Pi Code one-shot setup:
-//   1. installs server/ dependencies (pi-coding-agent 0.74.2)
+//   1. installs server/ dependencies (pi-coding-agent 1.5.0)
 //   2. rewrites app/local-config.ts with absolute paths for this machine
 //
 // Usage: node scripts/setup.mjs   (or `npm run setup` when a root package.json
@@ -16,7 +16,7 @@ const PROJECT_ROOT = path.resolve(HERE, "..");
 const SERVER_DIR = path.join(PROJECT_ROOT, "server");
 const LOCAL_CONFIG = path.join(PROJECT_ROOT, "app", "local-config.ts");
 const BRIDGE_PATH = path.join(SERVER_DIR, "bridge.mjs");
-const PI_VERSION_FALLBACK = "0.74.2";
+const PI_VERSION_FALLBACK = "1.5.0";
 
 function log(message) {
   console.log(`[setup] ${message}`);
@@ -85,7 +85,7 @@ const PROJECT_ROOT = MODULE_DIR ? MODULE_DIR.replace(/[/\\\\]app$/, "") : "";
 export const BRIDGE_PATH = PROJECT_ROOT ? \`\${PROJECT_ROOT}/server/bridge.mjs\` : "";
 export const NODE_BIN = "node";
 export const DEFAULT_WORKSPACE = PROJECT_ROOT;
-export const PI_VERSION = "0.74.2";
+export const PI_VERSION = "1.5.0";
 `;
 
 async function writeLocalConfig() {

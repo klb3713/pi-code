@@ -2,7 +2,7 @@
 
 > 一个 Claude Code 桌面版风格的 AI coding 应用：**nsh** 原生界面 + **pi** agent 运行时。
 
-Pi Code 用 [pi](https://github.com/earendil-works/pi)（`@earendil-works/pi-coding-agent` 0.74.2）作为 AI coding agent 内核，用 [nsh](https://nsh.dev/zh-CN/docs/) 的 TSX 原生 UI 构建桌面界面。pi 以 `--mode rpc` 子进程运行完整的 agent loop（read / write / edit / bash / grep / find 工具、流式输出、会话持久化、上下文压缩），nsh 应用通过一个本地 Node bridge 与它通信。
+Pi Code 用 [pi](https://github.com/earendil-works/pi)（`@earendil-works/pi-coding-agent` 1.5.0）作为 AI coding agent 内核，用 [nsh](https://nsh.dev/zh-CN/docs/) 的 TSX 原生 UI 构建桌面界面。pi 以 `--mode rpc` 子进程运行完整的 agent loop（read / write / edit / bash / grep / find 工具、流式输出、会话持久化、上下文压缩），nsh 应用通过一个本地 Node bridge 与它通信。
 
 ![Pi Code 对话界面](docs/screenshots/chat.png)
 
@@ -27,10 +27,10 @@ Pi Code 用 [pi](https://github.com/earendil-works/pi)（`@earendil-works/pi-cod
 
 ## 快速开始
 
-环境要求：macOS 14+（nsh 桌面）、Node.js 22+、`nsh` CLI 0.4+（`nsh --version` 验证）。
+环境要求：macOS 14+（nsh 桌面）、Node.js **>= 22.19**（pi 1.5.0 的最低版本，推荐当前 LTS）、`nsh` CLI 0.4+（`nsh --version` 验证）。
 
 ```bash
-# 1. 安装 bridge 依赖（pi 0.74.2）并生成本机路径配置
+# 1. 安装 bridge 依赖（pi 1.5.0）并生成本机路径配置
 npm run setup
 
 # 2. 启动桌面应用（nsh 热更新）
@@ -79,7 +79,7 @@ Pi Code 也复用 pi 的原生 provider 配置。可以设置 `ANTHROPIC_API_KEY
 │  git_status / get_diff ...（docs/SPEC.md §3 协议）                        │
 │        │ spawn(process.execPath, pi --mode rpc --session-dir ...)        │
 │        ▼                                                                 │
-│  pi 0.74.2 agent loop（工具执行、会话、压缩、流式事件）                    │
+│  pi 1.5.0 agent loop（工具执行、会话、压缩、流式事件）                    │
 │        │ OpenAI-compatible                                              │
 │        ▼                                                                 │
 │  真实 provider  ··· 或 ···  server/mock-llm.mjs（Demo 模式）              │
@@ -127,6 +127,10 @@ nsh.json                nsh 应用配置、Tailwind 扩展、capabilities
 4. 聊天界面：消息流、Markdown、工具卡片、Composer。
 5. 侧边栏、文件树、变更/Diff、设置。
 6. 集成、nsh 测试、真实 pi e2e、视觉验收。
+
+**版本升级**
+
+- pi 从 0.74.2 升级到 **1.5.0**（Node ≥ 22.19）：采用 `agent_settled` 作为一次 run 的真正结束（自动重试/压缩/排队不再让 UI 提前变空闲），工具耗时改用 pi 上报的 `durationMs`，停止时先清空排队消息再中止，并新增 bridge `get_state` 命令。
 
 **后续可做**
 - 工具权限确认（write/bash 审批）、计划模式、多文件 diff 审阅。

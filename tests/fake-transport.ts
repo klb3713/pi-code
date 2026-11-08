@@ -157,7 +157,7 @@ export function createFakeTransport(options: FakeOptions = {}): BridgeTransport 
             workspace,
             mode: demo ? "demo" : "real",
             demo,
-            piVersion: "0.74.2",
+            piVersion: "1.5.0",
             models: [
               {
                 provider: demo ? "pi-demo" : "anthropic",

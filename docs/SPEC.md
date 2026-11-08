@@ -2,7 +2,7 @@
 
 Pi Code 是一个 Claude Code 桌面版风格的 AI coding 应用：
 - **UI**：nsh 0.4 TSX（原生桌面视图，macOS 优先，全部用 `nsh` / `nsh/base` 组件与 Tailwind 4 类）。
-- **Agent**：pi（`@earendil-works/pi-coding-agent`，固定 0.74.2），以 `pi --mode rpc` 子进程运行完整 agent loop（read/write/edit/bash 工具、会话、流式输出）。
+- **Agent**：pi（`@earendil-works/pi-coding-agent`，固定 1.5.0），以 `pi --mode rpc` 子进程运行完整 agent loop（read/write/edit/bash 工具、会话、流式输出）。
 - **桥接**：Node 进程 `server/bridge.mjs`，由 nsh 应用通过 `process.spawn("node", [...])` 启动，stdin/stdout 走 JSONL 协议。
 - **Demo 模型**：没有配置真实 provider 时，bridge 启动本地 OpenAI-compatible mock LLM（`server/mock-llm.mjs`），pi 仍然跑真实 agent loop 与工具调用，仅模型回复来自本地脚本。UI 明确标注「Demo 模型」。
 
@@ -68,6 +68,7 @@ type BridgeRequest =
   | { id: string; type: "new_session" }
   | { id: string; type: "switch_session"; sessionPath: string }
   | { id: string; type: "list_sessions"; limit?: number }
+  | { id: string; type: "get_state" }
   | { id: string; type: "set_model"; provider: string; modelId: string }
   | { id: string; type: "set_thinking"; level: ThinkingLevel }
   | { id: string; type: "list_files"; maxDepth?: number }
@@ -217,6 +218,7 @@ interface ReadFileInfo {
 | `prompt` | `{ accepted: true }`（事件继续流） |
 | `abort` / `new_session` / `switch_session` | `{}` |
 | `list_sessions` | `{ sessions: SessionInfo[] }` |
+| `get_state` | `{ isStreaming: boolean; isCompacting: boolean; thinkingLevel: ThinkingLevel; messageCount: number; model?: ModelInfo }` |
 | `set_model` | `{ model: ModelInfo; thinkingLevel: ThinkingLevel }` |
 | `set_thinking` | `{ level: ThinkingLevel }` |
 | `list_files` | `{ files: FileNode[] }` |
@@ -230,7 +232,7 @@ interface ReadFileInfo {
 - `message_start`（user）→ 立即显示用户消息。
 - 助手消息：`message_start`（assistant）开始流；`assistant_delta` 追加文本/思考；`assistant_toolcall` 添加工具调用块；`message_end` 完成。
 - `tool_start` → 工具卡片变 running；`tool_update` 追加输出；`tool_end` → done/error + duration。
-- `agent_end` → 整个 run 结束（busy=false）。
+- `agent_end` → 整个 run 结束（busy=false）。bridge 在 pi 1.x 上以权威事件 `agent_settled` 作为 run 真正结束的信号（自动重试/压缩/排队还可能继续），并在 `agent_end` 后 2s 兜底，因此一次 run 只会向 UI 发一次 `agent_end`。
 - 所有事件必须可安全丢给 UI 多次；未知事件忽略。
 
 ---
@@ -291,7 +293,7 @@ interface ReadFileInfo {
 ## 8. 启动方式
 
 ```bash
-npm run setup       # 安装 server 依赖（pi 0.74.2），生成 app/local-config.ts
+npm run setup       # 安装 server 依赖（pi 1.5.0），生成 app/local-config.ts
 nsh run App.tsx     # 启动桌面应用
 nsh test            # 跑测试
 ```

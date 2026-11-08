@@ -20,4 +20,4 @@ const PROJECT_ROOT = MODULE_DIR ? MODULE_DIR.replace(/[/\\]app$/, "") : "";
 export const BRIDGE_PATH = "/Users/klb3713/work/pi-code/server/bridge.mjs";
 export const NODE_BIN = "node";
 export const DEFAULT_WORKSPACE = "/Users/klb3713/work/pi-code";
-export const PI_VERSION = "0.74.2";
+export const PI_VERSION = "1.5.0";

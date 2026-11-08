@@ -119,6 +119,7 @@ export type BridgeRequest =
   | { id: string; type: "new_session" }
   | { id: string; type: "switch_session"; sessionPath: string }
   | { id: string; type: "list_sessions"; limit?: number }
+  | { id: string; type: "get_state" }
   | { id: string; type: "set_model"; provider: string; modelId: string }
   | { id: string; type: "set_thinking"; level: ThinkingLevel }
   | { id: string; type: "list_files"; maxDepth?: number }

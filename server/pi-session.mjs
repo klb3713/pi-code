@@ -1,13 +1,17 @@
-// Wraps a `pi --mode rpc` child process (pi-coding-agent 0.74.2) and converts
+// Wraps a `pi --mode rpc` child process (pi-coding-agent 1.5.0) and converts
 // its event stream into the Pi Code bridge protocol (docs/SPEC.md §3.3/§3.5).
 //
-// Important: pi 0.74 `message_update` events carry a cumulative `message`
-// object and an `assistantMessageEvent.partial` copy of the whole message.
-// They are stripped here — only small deltas and the final `message_end`
-// message cross the bridge boundary.
+// Wire size: pi's `message_update` events carry a cumulative `message` object
+// and an `assistantMessageEvent.partial` copy of the whole message. Only the
+// small deltas and the final `message_end` message cross the bridge boundary.
+//
+// Run lifecycle: `agent_end` ends one low-level agent run, but automatic
+// retries, overflow recovery, compaction or queued work can still follow.
+// `agent_settled` (pi >= 0.75) is the authoritative end of a session-level run,
+// so the UI leaves its busy state on that event.
 
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,12 +19,30 @@ const PI_PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))),
   "..",
 );
-const PI_CLI_PATH = path.join(PI_PACKAGE_ROOT, "dist", "cli.js");
+const PI_BUNDLE_CLI_PATH = path.join(PI_PACKAGE_ROOT, "dist", "bundle", "cli.js");
+const PI_SOURCE_CLI_PATH = path.join(PI_PACKAGE_ROOT, "dist", "cli.js");
+// pi 1.x ships dist/bundle/cli.js (its `bin` entry); the older dist/cli.js is a
+// thin shim that loads many modules. Prefer the bundle when it exists.
+const PI_CLI_PATH = existsSync(PI_BUNDLE_CLI_PATH) ? PI_BUNDLE_CLI_PATH : PI_SOURCE_CLI_PATH;
 const PI_VERSION = JSON.parse(readFileSync(path.join(PI_PACKAGE_ROOT, "package.json"), "utf8")).version;
 
 export { PI_VERSION, PI_CLI_PATH };
 
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+
+/** How long `agent_end` waits for the authoritative `agent_settled`. */
+const SETTLE_GUARD_MS = 2_000;
+
+/**
+ * Whether this pi release reports session-level run ends with `agent_settled`
+ * (added in 0.75) instead of only the low-level `agent_end`.
+ */
+function settlesRuns(version) {
+  const [major, minor] = String(version)
+    .split(".")
+    .map((part) => Number.parseInt(part, 10) || 0);
+  return major > 0 || (major === 0 && minor >= 75);
+}
 
 function numberOrUndefined(value) {
   const n = Number(value);
@@ -185,6 +207,9 @@ export class PiSession {
     this.pending = new Map();
     this.nextRequestId = 1;
     this.aborted = false;
+    this.settlesRuns = settlesRuns(PI_VERSION);
+    this.settleGuard = null;
+    this.runFinished = false;
     this.toolStartedAt = new Map();
     this.toolTextLength = new Map();
     this.stopping = false;
@@ -291,6 +316,11 @@ export class PiSession {
     switch (event.type) {
       case "agent_start": {
         this.aborted = false;
+        this.runFinished = false;
+        if (this.settleGuard) {
+          clearTimeout(this.settleGuard);
+          this.settleGuard = null;
+        }
         this.emit({ type: "agent_start" });
         break;
       }
@@ -380,13 +410,16 @@ export class PiSession {
         this.toolStartedAt.delete(id);
         this.toolTextLength.delete(id);
         const resultText = contentToText(event.result?.content).slice(-40_000);
+        // pi >= 1.1 measures execute() with a monotonic clock; prefer it.
+        const reported = Number.isFinite(event.durationMs) ? Number(event.durationMs) : undefined;
+        const durationMs = reported ?? (startedAt ? Math.max(0, Date.now() - startedAt) : undefined);
         this.emit({
           type: "tool_end",
           toolCallId: id,
           toolName: String(event.toolName ?? "tool"),
           resultText,
           isError: Boolean(event.isError),
-          durationMs: startedAt ? Math.max(0, Date.now() - startedAt) : undefined,
+          ...(durationMs === undefined ? {} : { durationMs }),
         });
         break;
       }
@@ -395,14 +428,29 @@ export class PiSession {
         break;
       }
       case "agent_end": {
-        const aborted =
-          this.aborted ||
-          (Array.isArray(event.messages) &&
-            event.messages.some(
-              (message) => message?.role === "assistant" && message?.stopReason === "aborted",
-            ));
-        this.aborted = false;
-        this.emit({ type: "agent_end", ...(aborted ? { aborted: true } : {}) });
+        if (Array.isArray(event.messages) && event.messages.some(
+          (message) => message?.role === "assistant" && message?.stopReason === "aborted",
+        )) {
+          this.aborted = true;
+        }
+        // pi >= 0.75 follows a low-level run end with `agent_settled` once no
+        // retry, compaction or queued work is left; the UI waits for that one
+        // so a retried run does not flash "idle". Older releases only send
+        // `agent_end`, so they report the run as finished right away.
+        if (!this.settlesRuns) {
+          this.finishRun();
+          break;
+        }
+        // Safety net: if no `agent_settled` follows (an extension-driven run, or
+        // a future protocol change), settle the run anyway so the UI never hangs.
+        if (this.settleGuard) clearTimeout(this.settleGuard);
+        this.settleGuard = setTimeout(() => this.finishRun(), SETTLE_GUARD_MS);
+        this.settleGuard.unref?.();
+        break;
+      }
+      case "agent_settled": {
+        if (event.aborted) this.aborted = true;
+        this.finishRun();
         break;
       }
       case "queue_update": {
@@ -437,6 +485,24 @@ export class PiSession {
         // Unknown / noisy pi events are ignored on purpose.
         break;
     }
+  }
+
+  /**
+   * Reports a finished session-level run exactly once.
+   *
+   * With pi >= 0.75 this runs on `agent_settled`; a guard timer after
+   * `agent_end` covers a missing settle event.
+   */
+  finishRun() {
+    if (this.runFinished) return;
+    this.runFinished = true;
+    if (this.settleGuard) {
+      clearTimeout(this.settleGuard);
+      this.settleGuard = null;
+    }
+    const aborted = this.aborted;
+    this.aborted = false;
+    this.emit({ type: "agent_end", ...(aborted ? { aborted: true } : {}) });
   }
 
   emit(event) {
@@ -478,11 +544,34 @@ export class PiSession {
     return { accepted: true };
   }
 
+  /** Drops queued steering and follow-up messages, returning their text. */
+  async clearQueue() {
+    if (!this.alive) return { steering: [], followUp: [] };
+    const response = await this.request("clear_queue", {}, 10_000);
+    if (!response.success) throw new Error(response.error ?? "clear_queue 失败");
+    const data = response.data ?? {};
+    return {
+      steering: Array.isArray(data.steering) ? data.steering.map(String) : [],
+      followUp: Array.isArray(data.followUp) ? data.followUp.map(String) : [],
+    };
+  }
+
+  /**
+   * Stops the current run. Queued steering/follow-up messages are dropped
+   * first (pi's own Esc behavior), so `abort` does not immediately continue
+   * with whatever was queued.
+   */
   async abort() {
     this.aborted = true;
+    let cleared = null;
+    try {
+      cleared = await this.clearQueue();
+    } catch (error) {
+      this.onLog(`clear_queue failed: ${String(error)}`);
+    }
     const response = await this.request("abort", {}, 15_000);
     if (!response.success) throw new Error(response.error ?? "abort 失败");
-    return {};
+    return cleared ? { cleared } : {};
   }
 
   async newSession() {
@@ -537,6 +626,10 @@ export class PiSession {
   finishExit(info) {
     if (this.exited) return;
     this.exited = true;
+    if (this.settleGuard) {
+      clearTimeout(this.settleGuard);
+      this.settleGuard = null;
+    }
     this.alive = false;
     this.child = null;
     const error = info.error ? new Error(info.error) : new Error(`pi 进程已退出（${info.code ?? info.signal ?? "unknown"}）`);
