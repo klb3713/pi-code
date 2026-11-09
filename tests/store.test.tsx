@@ -17,7 +17,11 @@ import {
   model,
   models,
   settings,
+  settingsError,
+  settingsOpen,
+  settingsSaving,
   phase,
+  reconnect,
   runMode,
   setTransport,
   thinking,
@@ -50,6 +54,15 @@ function resetStore(): void {
   usage.set(emptyUsage());
   changedFiles.set([]);
   toast.set(null);
+  settingsSaving.set(false);
+  settingsError.set("");
+  settingsOpen.set(false);
+  settings.update((current) => ({
+    ...current,
+    modelKey: "",
+    thinking: "off",
+    gateway: { baseUrl: "", apiKey: "" },
+  }));
 }
 
 function textOf(value: unknown): string {
@@ -279,6 +292,13 @@ test("ready event fills connection, models, workspace and settings", () => {
       thinkingLevel: "medium",
       sessionId: "sess-1",
       git: { branch: "main" },
+      config: {
+        workspace: "/tmp/pi-code-test-workspace",
+        mode: "demo",
+        modelKey: "pi-demo/pi-demo-1",
+        thinking: "medium",
+        gateway: { baseUrl: "", apiKey: "" },
+      },
     },
   });
   expect(phase()).toBe("ready");
@@ -358,10 +378,152 @@ test("applySettings applies a model change without reconnecting", async () => {
       ],
       currentModel: { provider: "pi-demo", id: "pi-demo-1", name: "Pi Demo 1" },
       thinkingLevel: "off",
+      config: {
+        workspace: "/tmp/pi-code-demo",
+        mode: "demo",
+        modelKey: "pi-demo/pi-demo-1",
+        thinking: "off",
+        gateway: { baseUrl: "", apiKey: "" },
+      },
     },
   });
   settings.update((current) => ({ ...current, workspace: "/tmp/pi-code-demo", mode: "demo", modelKey: "pi-demo/pi-demo-2" }));
   await actions.applySettings();
   expect(transport.calls.some((call) => call.type === "set_model")).toBe(true);
+  expect(transport.calls.some((call) => call.type === "reconnect")).toBe(false);
   expect(model()?.id).toBe("pi-demo-2");
+});
+
+test("applySettings persists a custom gateway and reconnects without restarting the app", async () => {
+  const transport = createFakeTransport({ delayMs: 0 });
+  setTransport(transport);
+  applyEvent({
+    type: "ready",
+    data: {
+      workspace: "/tmp/pi-code-demo",
+      mode: "demo",
+      demo: true,
+      piVersion: "1.5.0",
+      models: [{ provider: "pi-demo", id: "pi-demo-1", name: "Pi Demo 1" }],
+      currentModel: { provider: "pi-demo", id: "pi-demo-1", name: "Pi Demo 1" },
+      thinkingLevel: "off",
+      config: {
+        workspace: "/tmp/pi-code-demo",
+        mode: "demo",
+        modelKey: "pi-demo/pi-demo-1",
+        thinking: "off",
+        gateway: { baseUrl: "", apiKey: "" },
+      },
+    },
+  });
+  settingsOpen.set(true);
+  settings.update((current) => ({
+    ...current,
+    mode: "real",
+    modelKey: "",
+    gateway: { baseUrl: "http://127.0.0.1:3425/v1/", apiKey: "secret-key" },
+  }));
+
+  await actions.applySettings();
+
+  const save = transport.calls.find((call) => call.type === "save_config");
+  expect(save).toBeDefined();
+  expect(save?.payload.config).toMatchObject({
+    mode: "real",
+    gateway: { baseUrl: "http://127.0.0.1:3425/v1", apiKey: "secret-key" },
+  });
+  expect(transport.calls.some((call) => call.type === "reconnect")).toBe(true);
+  expect(model()?.provider).toBe("openai-gateway");
+  expect(settings().modelKey).toBe("openai-gateway/gateway-model-1");
+  expect(settingsSaving()).toBe(false);
+  expect(settingsError()).toBe("");
+  // The freshly discovered models are shown in the same dialog so a default
+  // model can be picked right away.
+  expect(settingsOpen()).toBe(true);
+  expect(settings().mode).toBe("real");
+
+  settings.update((current) => ({ ...current, modelKey: "openai-gateway/gateway-model-2" }));
+  await actions.applySettings();
+
+  expect(transport.calls.filter((call) => call.type === "reconnect").length).toBe(1);
+  expect(
+    transport.calls.some((call) => call.type === "set_model" && call.payload.modelId === "gateway-model-2"),
+  ).toBe(true);
+  expect(model()?.id).toBe("gateway-model-2");
+  expect(settingsOpen()).toBe(false);
+});
+
+test("boot retries a transient bridge failure instead of staying disconnected", async () => {
+  const transport = createFakeTransport({ initFailures: 1 });
+  setTransport(transport);
+
+  await reconnect("/tmp/pi-code-demo", "demo");
+
+  expect(phase()).toBe("ready");
+  expect(connection()).toBe("connected");
+  expect(transport.calls.filter((call) => call.type === "reconnect").length).toBe(2);
+});
+
+test("applySettings warns when a saved gateway falls back to Demo", async () => {
+  const transport = createFakeTransport({ gatewayFails: true });
+  setTransport(transport);
+  applyEvent({
+    type: "ready",
+    data: {
+      workspace: "/tmp/pi-code-demo",
+      mode: "demo",
+      demo: true,
+      piVersion: "1.5.0",
+      models: [{ provider: "pi-demo", id: "pi-demo-1", name: "Pi Demo 1" }],
+      currentModel: { provider: "pi-demo", id: "pi-demo-1", name: "Pi Demo 1" },
+      thinkingLevel: "off",
+      config: {
+        workspace: "/tmp/pi-code-demo",
+        mode: "demo",
+        modelKey: "pi-demo/pi-demo-1",
+        thinking: "off",
+        gateway: { baseUrl: "", apiKey: "" },
+      },
+    },
+  });
+  settingsOpen.set(true);
+  settings.update((current) => ({
+    ...current,
+    mode: "auto",
+    modelKey: "",
+    gateway: { baseUrl: "http://127.0.0.1:9/v1", apiKey: "" },
+  }));
+
+  await actions.applySettings();
+
+  expect(settingsOpen()).toBe(true);
+  expect(settingsError()).toContain("回退 Demo");
+  expect(runMode()).toBe("demo");
+});
+
+test("applySettings keeps the dialog open when config persistence fails", async () => {
+  const transport = createFakeTransport();
+  const request = transport.request.bind(transport);
+  transport.request = (type, payload = {}, timeoutMs) => {
+    if (type === "save_config") {
+      return Promise.resolve({
+        id: "failed-save",
+        type: "response",
+        command: type,
+        success: false,
+        error: "disk is read-only",
+      });
+    }
+    return request(type, payload, timeoutMs);
+  };
+  setTransport(transport);
+  settingsOpen.set(true);
+  settings.update((current) => ({ ...current, gateway: { baseUrl: "not a url", apiKey: "" } }));
+
+  await actions.applySettings();
+
+  expect(settingsOpen()).toBe(true);
+  expect(settingsError()).toBe("disk is read-only");
+  expect(settingsSaving()).toBe(false);
+  expect(transport.calls.some((call) => call.type === "reconnect")).toBe(false);
 });

@@ -14,6 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { startMockLlm } from "./mock-llm.mjs";
 import { gitStatus, getDiff } from "./workspace.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -184,6 +185,8 @@ function git(cwd, args) {
 async function main() {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "pi-code-bridge-test-"));
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-code-bridge-data-"));
+  // Never touch the developer's ~/.pi-code/config.json from a test.
+  const configDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-code-bridge-config-"));
   let child;
   let client;
 
@@ -199,7 +202,7 @@ async function main() {
 
     child = spawn(process.execPath, [BRIDGE_PATH], {
       cwd: workspace,
-      env: { ...process.env },
+      env: { ...process.env, PI_CODE_CONFIG_DIR: configDir },
       stdio: ["pipe", "pipe", "pipe"],
     });
     client = new BridgeClient(child);
@@ -442,6 +445,115 @@ async function main() {
       return `sessions=${sessions.length}, current messages=${current.messageCount}`;
     });
 
+    // ── config file + runtime gateway switch ─────────────────────────────
+    // The user-facing flow: save a custom OpenAI-compatible gateway in the
+    // settings dialog, reconnect without restarting the app, then run the real
+    // pi agent loop against it.
+    const configFile = path.join(configDir, "config.json");
+    const gatewayMock = await startMockLlm();
+    try {
+      await check("save_config persists every setting to config.json", async () => {
+        const response = await client.request("save_config", {
+          config: {
+            workspace,
+            mode: "real",
+            modelKey: "",
+            thinking: "medium",
+            gateway: { baseUrl: `${gatewayMock.url}/v1/`, apiKey: "gateway-test-key" },
+          },
+        });
+        assert(response.success, `save_config 失败：${response.error}`);
+        assert(response.data?.config?.gateway?.baseUrl === `${gatewayMock.url}/v1`, "响应未规范化网关地址");
+        const saved = JSON.parse(await fs.readFile(configFile, "utf8"));
+        assert(saved.mode === "real", `mode 应持久化为 real，实际 ${saved.mode}`);
+        assert(saved.thinking === "medium", `thinking 应持久化，实际 ${saved.thinking}`);
+        assert(saved.workspace === workspace, "workspace 未持久化");
+        assert(saved.gateway.baseUrl === `${gatewayMock.url}/v1`, "gateway.baseUrl 未持久化");
+        assert(saved.gateway.apiKey === "gateway-test-key", "gateway.apiKey 未持久化");
+        const stat = await fs.stat(configFile);
+        assert((stat.mode & 0o777) === 0o600, `config.json 权限应为 600，实际 ${(stat.mode & 0o777).toString(8)}`);
+        return `config.json (${(stat.mode & 0o777).toString(8)}) workspace/mode/thinking/gateway`;
+      });
+
+      await check("reconnect uses the saved gateway and returns its config", async () => {
+        const response = await client.request(
+          "reconnect",
+          {
+            // A stale request must not override the persisted file.
+            workspace,
+            mode: "demo",
+            dataDir,
+            config: {
+              workspace,
+              mode: "demo",
+              modelKey: "",
+              thinking: "off",
+              gateway: { baseUrl: "", apiKey: "" },
+            },
+          },
+          120_000,
+        );
+        assert(response.success, `reconnect 失败：${response.error}`);
+        const data = response.data;
+        assert(data.mode === "real", `应使用保存的 real 模式，实际 ${data.mode}`);
+        assert(data.config?.gateway?.baseUrl === `${gatewayMock.url}/v1`, "ReadyInfo.config 未回传保存的网关");
+        assert(data.config?.thinking === "medium", "ReadyInfo.config 未回传保存的 thinking");
+        // pi clamps thinking to what the model supports; the mock gateway model
+        // is not a reasoning model, so the effective level is off while the
+        // saved preference stays medium.
+        assert(data.thinkingLevel === "off", `非 reasoning 模型的 thinking 应被钳制为 off，实际 ${data.thinkingLevel}`);
+        const gatewayModels = data.models.filter((model) => model.provider === "openai-gateway");
+        assert(gatewayModels.length >= 1, "models 中没有 openai-gateway 模型");
+        assert(data.currentModel?.provider === "openai-gateway", "当前模型应来自网关");
+        return `mode=real, models=${gatewayModels.map((model) => model.id).join(",")}`;
+      });
+
+      await check("the gateway key stays out of the generated models.json", async () => {
+        const modelsJson = await fs.readFile(
+          path.join(dataDir, "pi-code", "openai-gateway-agent", "models.json"),
+          "utf8",
+        );
+        assert(!modelsJson.includes("gateway-test-key"), "models.json 不应写入 API Key");
+        assert(modelsJson.includes("OPENAI_API_KEY"), "models.json 应通过环境变量名引用密钥");
+        return "密钥仅通过子进程环境注入";
+      });
+
+      await check("gateway runtime executes a real pi tool call", async () => {
+        const since = client.since();
+        const response = await client.request("prompt", { message: "创建一个 gateway-demo.md 演示文件" }, 30_000);
+        assert(response.success, `prompt 失败：${response.error}`);
+        await client.waitFor(
+          (event) => event.type === "tool_end" && event.toolName === "write" && event.isError === false,
+          { since, timeoutMs: 60_000, label: "tool_end(write via gateway)" },
+        );
+        await client.waitFor((event) => event.type === "agent_end", { since, timeoutMs: 60_000, label: "agent_end" });
+        const content = await fs.readFile(path.join(workspace, "gateway-demo.md"), "utf8");
+        assert(content.includes("Pi Code Demo"), "网关运行时未真实写入文件");
+        return "prompt → write tool → disk";
+      });
+
+      await check("set_model persists the selected default gateway model", async () => {
+        const response = await client.request("set_model", {
+          provider: "openai-gateway",
+          modelId: "pi-demo-1",
+        });
+        assert(response.success, `set_model 失败：${response.error}`);
+        const saved = JSON.parse(await fs.readFile(configFile, "utf8"));
+        assert(saved.modelKey === "openai-gateway/pi-demo-1", `默认模型未持久化：${saved.modelKey}`);
+        return `modelKey=${saved.modelKey}`;
+      });
+
+      await check("set_thinking persists the chosen level", async () => {
+        const response = await client.request("set_thinking", { level: "low" });
+        assert(response.success, `set_thinking 失败：${response.error}`);
+        const saved = JSON.parse(await fs.readFile(configFile, "utf8"));
+        assert(saved.thinking === "low", `thinking 未持久化：${saved.thinking}`);
+        return "thinking=low 已写入 config.json";
+      });
+    } finally {
+      await gatewayMock.close();
+    }
+
     await client.shutdown();
     await check("shutdown", async () => {
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -460,8 +572,11 @@ async function main() {
     if (failures === 0) {
       await fs.rm(workspace, { recursive: true, force: true }).catch(() => {});
       await fs.rm(dataDir, { recursive: true, force: true }).catch(() => {});
+      await fs.rm(configDir, { recursive: true, force: true }).catch(() => {});
     } else {
-      console.error(`\nwork dirs kept for debugging:\n  workspace=${workspace}\n  dataDir=${dataDir}`);
+      console.error(
+        `\nwork dirs kept for debugging:\n  workspace=${workspace}\n  dataDir=${dataDir}\n  configDir=${configDir}`,
+      );
     }
   }
 

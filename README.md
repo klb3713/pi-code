@@ -13,7 +13,7 @@ Pi Code 用 [pi](https://github.com/earendil-works/pi)（`@earendil-works/pi-cod
 - **工作区文件树**：右侧 Files 面板浏览、展开目录、打开只读文件预览（行号 + 等宽字体）。
 - **变更与 Diff**：Changes 面板汇总本次会话/git 变更，点击用 `DiffView` 查看 unified diff。
 - **会话管理**：新建会话、最近会话列表、切换历史会话（读取 pi session 文件）。
-- **模型与设置**：模型选择、thinking level、工作区路径、运行模式（auto / demo / real）。
+- **模型与设置**：默认模型选择、thinking level、工作区路径、运行模式（auto / demo / real）、自定义 OpenAI 兼容网关；全部设置持久化到 `~/.pi-code/config.json`。
 - **桌面体验**：自定义标题栏（macOS 红绿灯内嵌）、三栏布局、状态栏（模型 / token / 成本 / 分支）、⌘N / ⌘, / ⌘B 快捷键。
 - **Demo 模式**：没有配置真实 provider 时自动启动本地 OpenAI-compatible Mock LLM——**pi 的 agent loop 与工具执行仍然是真实的**，只有模型回复由本地脚本生成，便于开箱即用与端到端测试。
 
@@ -73,30 +73,33 @@ bridge 固定只监听本机 `ws://127.0.0.1:8787/bridge`，不开放局域网�
 
 ```bash
 npm run check
-npm test
-npm run test:bridge   # stdio 与 WS 的真实 pi / mock LLM 集成测试
+npm test              # 隔离配置目录后运行完整 nsh 测试
+npm run test:config   # 配置校验 / 原子写入 / 首次迁移单测
+npm run test:bridge   # 配置单测 + stdio / WS 的真实 pi / mock LLM 集成测试
 npm run test:web      # 自动启动临时 WS 服务，再跑 nsh --target web
 npm run test:macos    # 在真正的 macOS host 上验证桌面连接
 npm run test:launcher # 一键启动、Ctrl+C 清理、端口冲突与 UI 退出回归
 ```
 
+`npm test` 通过 `scripts/test.mjs` 以临时 `PI_CODE_CONFIG_DIR` 运行 `nsh test`，因此真实 bridge 测试（`tests/e2e.test.tsx`、`tests/platform-bootstrap.test.tsx`）不会读取或覆盖你本机的 `~/.pi-code/config.json`。`test:web` / `test:macos` 同样使用临时配置目录。若直接运行 `nsh test`，测试会检测到非 Demo 模式并在发送任何消息前失败，避免误用你的真实网关。
+
 `test:web` 需要本机 Chrome / Edge / Chromium，并独占 8787；先停止 `dev:web` 或手动启动的 `bridge:web`。`test:launcher` 需要 8787 / 8790 都空闲。测试专用服务仅在运行期间允许随机端口的 loopback 页面来源，正常 `bridge:web` 的白名单不变。
 
 ### 使用自定义 OpenAI 兼容网关（推荐）
 
-Pi Code 支持任意 OpenAI 兼容网关。bridge 会读取 `OPENAI_BASE_URL`，自动请求 `${OPENAI_BASE_URL}/models`，把返回的模型注册为 pi 的 `openai-gateway` provider：
+启动后打开「设置」（⌘,），在「自定义 OpenAI 兼容网关」中填写：
 
-```bash
-export OPENAI_BASE_URL=http://127.0.0.1:3425/v1
-export OPENAI_API_KEY=your-api-key
-# 可选：指定默认模型；不设置时使用 /models 返回的第一个模型
-export OPENAI_MODEL=auto/glm-5.3
-nsh run App.tsx
-```
+- **Base URL**：例如 `http://127.0.0.1:3425/v1`；留空则使用 pi 原生 provider。
+- **API Key**：网关密钥；无需认证的本地网关可以留空。
+- **运行模式**：选择「自动」或「真实」，然后保存。保存后立即重新连接，无需重启应用。
 
-启动后状态栏会显示 `LIVE`，模型 chip 显示网关模型名（例如 `GLM-5.3`）；设置里的「模型」下拉会列出网关返回的全部模型。`OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` 都已在 `nsh.json` 的 process capabilities 中授权。
+bridge 会请求 `${Base URL}/models` 并刷新「默认模型」下拉框。选择模型并再次保存，即可把它设为之后启动时使用的默认模型。状态栏显示 `LIVE`，模型 chip 显示当前网关模型。
 
-如果网关不可用：`auto` 模式会回退 Demo；`real` 模式会显示明确错误。
+所有设置（工作区、运行模式、默认模型、Thinking、网关地址与密钥）统一保存在 **`~/.pi-code/config.json`**，桌面与 Web 传输都由本机 bridge 读写同一份文件。API Key 只通过本机 bridge 使用，不会显示在日志中；请像对待其他本机凭据文件一样保护该配置。
+
+首次启动仍会读取 `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` 作为初始网关配置，旧版 nsh Storage 中的工作区、模式、模型与 Thinking 也会迁移。配置文件一旦存在便以文件为准，之后在设置窗口修改即可，不再依赖启动环境变量。
+
+如果网关不可用：`auto` 模式会回退 Demo；`real` 模式会在设置窗口显示明确错误，可修改后立即重试。
 
 ### 使用其他 pi provider
 
@@ -148,11 +151,13 @@ app/
   lib/format.ts         格式化工具
 server/
   bridge.mjs            JSONL 请求分发 + 生命周期
+  config.mjs            ~/.pi-code/config.json 读取、校验与原子写入
   pi-session.mjs        pi RPC 子进程封装与事件归一化
   mock-llm.mjs          OpenAI-compatible Demo 模型（SSE）
   workspace.mjs         文件树 / 读取 / git / diff
   websocket-server.mjs  loopback WS → 独立 bridge 子进程
-  test-bridge.mjs       stdio bridge 端到端自测
+  test-config.mjs       配置校验 / 原子写入 / 迁移单测
+  test-bridge.mjs       stdio bridge 端到端自测（含运行时切换网关）
   test-websocket.mjs    WS 协议 / Origin / 生命周期自测
   test-targets.mjs      真正 web / macOS host 的启动验证
 scripts/setup.mjs       安装 server 依赖、生成本机路径

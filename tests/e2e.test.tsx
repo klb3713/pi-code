@@ -1,12 +1,15 @@
 // End-to-end test: real bridge + pi 1.5.0 agent loop + the local mock LLM.
 //
-// The workspace is a throwaway directory inside the project (pluginDir), reset
-// outside the test run. pi really runs: it calls the write tool against the
-// workspace, and the bridge really reads the file back for the UI.
+// The workspace is the project root, whose `hello.ts` is gitignored; pi really
+// runs: it calls the write tool against the workspace, and the bridge really
+// reads the file back for the UI.
+//
+// `npm test` runs this file with an isolated PI_CODE_CONFIG_DIR, so the real
+// ~/.pi-code/config.json is neither read nor written. A bare `nsh test` would
+// use the developer's own config; the demo check below then fails before any
+// prompt reaches a real gateway.
 import { expect, open, test, type App } from "nsh/test";
 import { DEFAULT_WORKSPACE } from "../app/local-config";
-
-const WORKSPACE = `${DEFAULT_WORKSPACE}/.e2e-workspace`;
 
 function hasText(app: App, text: string): boolean {
   return app.texts().some((value) => value.includes(text));
@@ -21,12 +24,17 @@ test("真实 pi + mock LLM：创建 hello.ts、工具卡片与磁盘回读", asy
     platform: "macos",
     width: 1440,
     height: 900,
-    storage: { "pi-code.workspace": WORKSPACE, "pi-code.mode": "demo" },
+    storage: { "pi-code.workspace": DEFAULT_WORKSPACE, "pi-code.mode": "demo" },
   });
 
   // Real bridge boot: pi child process + demo mock LLM (no credentials).
   await app.waitFor("text:pi 已连接", { timeout: 60000 });
   expect(app.texts()).toContain("今天想构建什么？");
+  if (!hasText(app, "DEMO")) {
+    throw new Error(
+      "真实 bridge 测试需要 Demo 模式：请用 `npm test`（隔离 ~/.pi-code/config.json），或清空该文件中的自定义网关后再试。",
+    );
+  }
 
   await app.type("给 Pi Code 一个小任务…", "创建一个 hello.ts 并打印 Hello");
   await app.press("↑");

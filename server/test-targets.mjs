@@ -2,10 +2,17 @@
 // short-lived test service accepts HTTP loopback origins with arbitrary ports.
 // The normal CLI service keeps its exact Origin allowlist.
 import { spawn } from "node:child_process";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { startWebSocketBridge } from "./websocket-server.mjs";
 
 const target = process.argv[2] ?? "web";
 if (target !== "web" && target !== "macos") throw new Error(`Unsupported test target: ${target}`);
+// Both the WebSocket service and the nsh host spawn bridge children; point
+// them at a throwaway config dir instead of the developer's ~/.pi-code.
+const configDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-code-target-config-"));
+process.env.PI_CODE_CONFIG_DIR = configDir;
 let service;
 let child;
 let stopping = false;
@@ -27,6 +34,7 @@ try {
   }
   child = spawn("nsh", ["test", "tests/platform-bootstrap.test.tsx", "--target", target], {
     stdio: "inherit",
+    env: { ...process.env, PI_CODE_CONFIG_DIR: configDir },
   });
   const stop = () => {
     stopping = true;
@@ -46,4 +54,5 @@ try {
   }
 } finally {
   await service?.close();
+  await fs.rm(configDir, { recursive: true, force: true }).catch(() => {});
 }

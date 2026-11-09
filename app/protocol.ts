@@ -5,6 +5,20 @@ export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhi
 
 export type RunMode = "auto" | "demo" | "real";
 
+export interface GatewayConfig {
+  baseUrl: string;
+  apiKey: string;
+}
+
+/** All user-editable settings, persisted by the bridge in ~/.pi-code/config.json. */
+export interface AppConfig {
+  workspace: string;
+  mode: RunMode;
+  modelKey: string;
+  thinking: ThinkingLevel;
+  gateway: GatewayConfig;
+}
+
 export interface ModelInfo {
   provider: string;
   id: string;
@@ -65,6 +79,7 @@ export interface ReadyInfo {
   sessionId?: string;
   sessionPath?: string;
   git?: { branch?: string };
+  config: AppConfig;
 }
 
 export interface SessionInfo {
@@ -112,8 +127,9 @@ export interface ReadFileInfo {
 }
 
 export type BridgeRequest =
-  | { id: string; type: "init"; workspace: string; mode: RunMode; dataDir?: string }
-  | { id: string; type: "reconnect"; workspace: string; mode: RunMode; dataDir?: string }
+  | { id: string; type: "init"; workspace: string; mode: RunMode; dataDir?: string; config?: AppConfig }
+  | { id: string; type: "reconnect"; workspace: string; mode: RunMode; dataDir?: string; config?: AppConfig }
+  | { id: string; type: "save_config"; config: AppConfig }
   | { id: string; type: "prompt"; message: string }
   | { id: string; type: "abort" }
   | { id: string; type: "new_session" }

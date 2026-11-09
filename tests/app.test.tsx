@@ -107,11 +107,15 @@ test("设置弹窗：打开、字段齐全并取消关闭", async () => {
   await app.press("text:设置");
   await app.waitFor("text:运行模式", { timeout: 10000 });
   expect(app.texts()).toContain("工作区");
-  expect(app.texts()).toContain("模型");
+  expect(app.texts()).toContain("自定义 OpenAI 兼容网关");
+  expect(app.texts()).toContain("Base URL");
+  expect(app.texts()).toContain("API Key");
+  expect(app.texts()).toContain("默认模型");
   expect(app.texts()).toContain("Thinking");
   expect(app.texts()).toContain("保存");
   expect(app.texts()).toContain("取消");
-  expect(hasText(app, "Demo 模式 = 本地模拟模型")).toBe(true);
+  expect(hasText(app, "~/.pi-code/config.json")).toBe(true);
+  expect(hasText(app, "Demo 使用本地模拟模型")).toBe(true);
 
   await app.press("text:取消");
   await app.waitFor("text:运行模式", { state: "gone", timeout: 10000 });

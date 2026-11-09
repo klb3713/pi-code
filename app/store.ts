@@ -9,6 +9,7 @@ import { DEFAULT_WORKSPACE } from "./local-config";
 import {
   emptyUsage,
   normalizeUsage,
+  type AppConfig,
   type BridgeEvent,
   type BridgeRequest,
   type BridgeResponse,
@@ -76,12 +77,7 @@ export interface ToastInfo {
   tone: "info" | "success" | "error";
 }
 
-export interface SettingsState {
-  workspace: string;
-  mode: RunMode;
-  modelKey: string;
-  thinking: ThinkingLevel;
-}
+export type SettingsState = AppConfig;
 
 // ── signals ────────────────────────────────────────────────────────────────
 export const phase = signal<Phase>("booting");
@@ -108,6 +104,8 @@ export const rightPanel = signal<RightPanel>("files");
 export const rightPanelOpen = signal(true);
 export const sidebarOpen = signal(true);
 export const settingsOpen = signal(false);
+export const settingsSaving = signal(false);
+export const settingsError = signal("");
 export const sessions = signal<SessionInfo[]>([]);
 export const toast = signal<ToastInfo | null>(null);
 export const sessionTitle = computed(() => {
@@ -131,8 +129,12 @@ export const settings = signal<SettingsState>({
   mode: "auto",
   modelKey: "",
   thinking: "off",
+  gateway: { baseUrl: "", apiKey: "" },
 });
 
+// Last configuration actually used by a ready runtime. Form edits live only in
+// `settings` until they are saved, so this is also the reconnect comparison base.
+let activeConfig: AppConfig | null = null;
 let idSeq = 0;
 let toastSeq = 0;
 let toastTimer: number | null = null;
@@ -463,29 +465,43 @@ function loadHistory(history: UiMessage[]): void {
 }
 
 function applyReady(info: ReadyInfo): void {
+  const currentKey = info.currentModel ? `${info.currentModel.provider}/${info.currentModel.id}` : "";
+  const saved = info.config;
+  const nextConfig: AppConfig = {
+    workspace: info.workspace,
+    mode: saved?.mode ?? (info.mode === "demo" ? "demo" : settings().mode),
+    modelKey: currentKey || saved?.modelKey || settings().modelKey,
+    // Keep the saved preference in the form: pi may clamp the effective level
+    // (e.g. a non-reasoning model), and a later save must not drop it.
+    thinking: saved?.thinking ?? info.thinkingLevel ?? "off",
+    gateway: {
+      baseUrl: saved?.gateway?.baseUrl ?? settings().gateway.baseUrl,
+      apiKey: saved?.gateway?.apiKey ?? settings().gateway.apiKey,
+    },
+  };
+  activeConfig = nextConfig;
   workspace.set(info.workspace);
   runMode.set(info.mode);
   piVersion.set(info.piVersion);
   models.set(info.models ?? []);
   model.set(info.currentModel);
-  thinking.set(info.thinkingLevel ?? "off");
+  thinking.set(nextConfig.thinking);
   connection.set("connected");
   phase.set("ready");
   bootError.set("");
-  settings.update((current) => ({
-    ...current,
-    workspace: info.workspace,
-    mode: info.mode === "demo" ? "demo" : current.mode,
-    modelKey: info.currentModel ? `${info.currentModel.provider}/${info.currentModel.id}` : current.modelKey,
-    thinking: info.thinkingLevel ?? current.thinking,
-  }));
+  settingsError.set("");
+  settings.set(nextConfig);
   if (info.git?.branch) git.update((current) => ({ ...current, branch: info.git?.branch }));
   if (info.sessionId) {
     sessions.update((list) => list);
   }
 }
 
-async function boot(ws: string, mode: RunMode, clear = true): Promise<void> {
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function boot(ws: string, mode: RunMode, clear = true, command: "init" | "reconnect" = "init"): Promise<void> {
   phase.set("booting");
   connection.set("connecting");
   bootError.set("");
@@ -501,23 +517,40 @@ async function boot(ws: string, mode: RunMode, clear = true): Promise<void> {
     sessions.set([]);
     busy.set(false);
   }
-  try {
-    transport.start(ws, mode);
-    const response = await transport.request(
-      "init",
-      // The browser's /app-data is OPFS, not an absolute path on the Node host.
-      { workspace: ws, mode, dataDir: isDesktop ? process.dataDir ?? "" : "" },
-      120_000,
-    );
-    if (!response.success) throw new Error(response.error ?? "bridge init 失败");
-    if (response.data) applyReady(response.data as ReadyInfo);
-    await actions.refreshAll();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    connection.set("disconnected");
-    phase.set("error");
-    bootError.set(message);
+  // The browser talks to a separate local service, which may still be starting
+  // (or be restarted by the launcher). Retry briefly before showing an error.
+  const attempts = isDesktop ? 1 : 3;
+  let lastMessage = "";
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      transport.start(ws, mode);
+      const response = await transport.request(
+        command,
+        // The browser's /app-data is OPFS, not an absolute path on the Node host.
+        {
+          workspace: ws,
+          mode,
+          dataDir: isDesktop ? process.dataDir ?? "" : "",
+          // Used only to migrate legacy nsh storage when config.json is absent.
+          config: { ...settings(), workspace: ws, mode, gateway: { ...settings().gateway } },
+        },
+        120_000,
+      );
+      if (!response.success) throw new Error(response.error ?? "bridge init 失败");
+      if (response.data) applyReady(response.data as ReadyInfo);
+      await actions.refreshAll();
+      return;
+    } catch (error) {
+      lastMessage = error instanceof Error ? error.message : String(error);
+      if (attempt < attempts) {
+        connection.set("connecting");
+        await delay(500 * attempt);
+      }
+    }
   }
+  connection.set("disconnected");
+  phase.set("error");
+  bootError.set(lastMessage);
 }
 
 /** Boots the app once: restores settings and starts the bridge. */
@@ -552,23 +585,20 @@ export async function bootstrap(): Promise<void> {
     if (!stillThere) ws = defaultWorkspace;
   }
   const mode: RunMode = storedMode === "demo" || storedMode === "real" ? storedMode : "auto";
-  settings.set({ ...settings(), workspace: ws, mode, thinking: storedThinking ?? "off", modelKey: storedModel ?? "" });
+  settings.set({
+    ...settings(),
+    workspace: ws,
+    mode,
+    thinking: storedThinking ?? "off",
+    modelKey: storedModel ?? "",
+    gateway: { ...settings().gateway },
+  });
   await boot(ws, mode);
-  if (storedModel && phase() === "ready") {
-    const [provider, ...rest] = storedModel.split("/");
-    const modelId = rest.join("/");
-    if (provider && modelId && models().some((item) => item.provider === provider && item.id === modelId)) {
-      await actions.setModel(provider, modelId);
-    }
-  }
-  if (storedThinking && phase() === "ready" && storedThinking !== thinking()) {
-    await actions.setThinking(storedThinking);
-  }
 }
 
 /** Exposed for tests and the settings dialog. */
 export async function reconnect(ws: string, mode: RunMode): Promise<void> {
-  await boot(ws, mode, true);
+  await boot(ws, mode, true, "reconnect");
 }
 
 export function shutdown(): void {
@@ -647,8 +677,10 @@ export const actions = {
       if (!response.success) throw new Error(response.error ?? "设置模型失败");
       const data = response.data as { model?: ModelInfo; thinkingLevel?: ThinkingLevel } | undefined;
       if (data?.model) model.set(data.model);
+      const modelKey = `${provider}/${modelId}`;
+      settings.update((current) => ({ ...current, modelKey }));
+      if (activeConfig) activeConfig = { ...activeConfig, modelKey };
       showToast(`已切换到 ${data?.model?.name ?? modelId}`, "success");
-      await Storage.setItem("pi-code.model", `${provider}/${modelId}`).catch(() => {});
     } catch (error) {
       showToast(`设置模型失败：${String(error)}`, "error");
     }
@@ -656,10 +688,11 @@ export const actions = {
 
   async setThinking(level: ThinkingLevel): Promise<void> {
     try {
-      await transport.request("set_thinking", { level }, 15_000);
+      const response = await transport.request("set_thinking", { level }, 15_000);
+      if (!response.success) throw new Error(response.error ?? "设置思考级别失败");
       thinking.set(level);
       settings.update((current) => ({ ...current, thinking: level }));
-      await Storage.setItem("pi-code.thinking", level).catch(() => {});
+      if (activeConfig) activeConfig = { ...activeConfig, thinking: level };
       showToast(`思考级别：${level}`, "success");
     } catch (error) {
       showToast(`设置思考级别失败：${String(error)}`, "error");
@@ -667,27 +700,65 @@ export const actions = {
   },
 
   async applySettings(): Promise<void> {
-    const next = settings();
-    await Storage.setItem("pi-code.workspace", next.workspace).catch(() => {});
-    await Storage.setItem("pi-code.mode", next.mode).catch(() => {});
-    await Storage.setItem("pi-code.thinking", next.thinking).catch(() => {});
-    if (next.modelKey) await Storage.setItem("pi-code.model", next.modelKey).catch(() => {});
-    const workspaceChanged = next.workspace !== workspace();
-    const modeChanged = (next.mode === "demo" && runMode() !== "demo") || (next.mode === "real" && runMode() !== "real");
-    settingsOpen.set(false);
-    if (workspaceChanged || modeChanged) {
-      await reconnect(next.workspace, next.mode);
-      if (phase() === "ready") showToast("工作区已连接", "success");
-    }
-    const currentKey = model() ? `${model()!.provider}/${model()!.id}` : "";
-    if (phase() === "ready" && next.modelKey && next.modelKey !== currentKey) {
-      const known = models().some((item) => `${item.provider}/${item.id}` === next.modelKey);
-      if (known) {
-        const [provider, ...rest] = next.modelKey.split("/");
-        await actions.setModel(provider, rest.join("/"));
+    if (settingsSaving()) return;
+    settingsSaving.set(true);
+    settingsError.set("");
+    try {
+      const current = settings();
+      const next: AppConfig = {
+        ...current,
+        workspace: current.workspace.trim(),
+        gateway: {
+          baseUrl: current.gateway.baseUrl.trim().replace(/\/+$/, ""),
+          apiKey: current.gateway.apiKey.trim(),
+        },
+      };
+      settings.set(next);
+      const saved = await transport.request("save_config", { config: next }, 20_000);
+      if (!saved.success) throw new Error(saved.error ?? "保存配置失败");
+
+      const workspaceChanged = next.workspace !== workspace();
+      const modeChanged = activeConfig ? next.mode !== activeConfig.mode : next.mode !== runMode();
+      const gatewayChanged =
+        !activeConfig ||
+        next.gateway.baseUrl !== activeConfig.gateway.baseUrl ||
+        next.gateway.apiKey !== activeConfig.gateway.apiKey;
+      const shouldReconnect = workspaceChanged || modeChanged || gatewayChanged;
+      if (shouldReconnect) await reconnect(next.workspace, next.mode);
+      if (phase() !== "ready") throw new Error(bootError() || "运行时连接失败");
+      if (gatewayChanged && next.mode !== "demo" && next.gateway.baseUrl && runMode() === "demo") {
+        // Auto mode falls back instead of failing; keep the dialog open so the
+        // address or key can be corrected right away.
+        const message = "网关连接失败，已回退 Demo 模式，请检查 Base URL 与 API Key";
+        settingsError.set(message);
+        showToast(message, "error");
+        return;
       }
+
+      const currentKey = model() ? `${model()!.provider}/${model()!.id}` : "";
+      if (next.modelKey && next.modelKey !== currentKey) {
+        const known = models().some((item) => `${item.provider}/${item.id}` === next.modelKey);
+        if (known) {
+          const [provider, ...rest] = next.modelKey.split("/");
+          await actions.setModel(provider, rest.join("/"));
+        }
+      }
+      if (next.thinking !== thinking()) await actions.setThinking(next.thinking);
+      // A newly saved gateway has just refreshed the model list. Keep the
+      // dialog open so its default model can be picked without reopening it.
+      if (gatewayChanged && !next.modelKey && models().length > 0) {
+        showToast("网关已连接，请选择默认模型", "success");
+        return;
+      }
+      settingsOpen.set(false);
+      showToast(shouldReconnect ? "设置已保存，运行时已重新连接" : "设置已保存", "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      settingsError.set(message);
+      showToast(`保存设置失败：${message}`, "error");
+    } finally {
+      settingsSaving.set(false);
     }
-    if (next.thinking !== thinking()) await actions.setThinking(next.thinking);
   },
 
   async refreshFiles(): Promise<void> {

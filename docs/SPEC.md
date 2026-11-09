@@ -19,7 +19,7 @@ Pi Code 是一个 Claude Code 桌面版风格的 AI coding 应用：
 4. **变更面板**：Changes 标签页，列出本次会话改动 / git 变更，+/− 行数，点击查看 DiffView。
 5. **会话**：新会话、最近会话列表（读取 pi session 文件）、切换会话。
 6. **模型**：模型选择器（来自 pi `get_available_models`；Demo 模式为 `pi-demo-1`）、thinking level。
-7. **设置**：工作区路径、运行模式（auto/demo/real）、模型、thinking level；应用后可重连。
+7. **设置**：工作区路径、运行模式（auto/demo/real）、默认模型、thinking level、自定义 OpenAI 兼容网关；所有配置保存到 `~/.pi-code/config.json`，应用后可重连，无需重启应用。
 8. **桌面外观**：自定义标题栏（`Window.setTitleBar({style:"hidden", height:44})`）、左侧栏、主聊天区、右侧面板、底部状态栏；Claude Code 风格深色主题（暖橙 #d97757）。
 
 非目标（v1 不做）：多点编辑审批、附件上传、终端面板、多窗口、移动端适配、插件市场。
@@ -61,8 +61,9 @@ stdout/stdin 均为「一行一个 JSON」。stdout 只放协议消息，日志�
 
 ```ts
 type BridgeRequest =
-  | { id: string; type: "init"; workspace: string; mode: "auto" | "demo" | "real"; dataDir?: string }
-  | { id: string; type: "reconnect"; workspace: string; mode: "auto" | "demo" | "real"; dataDir?: string }
+  | { id: string; type: "init"; workspace: string; mode: "auto" | "demo" | "real"; dataDir?: string; config?: AppConfig }
+  | { id: string; type: "reconnect"; workspace: string; mode: "auto" | "demo" | "real"; dataDir?: string; config?: AppConfig }
+  | { id: string; type: "save_config"; config: AppConfig }
   | { id: string; type: "prompt"; message: string }
   | { id: string; type: "abort" }
   | { id: string; type: "new_session" }
@@ -78,7 +79,17 @@ type BridgeRequest =
   | { id: string; type: "shutdown" };
 
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+interface AppConfig {
+  workspace: string;
+  mode: "auto" | "demo" | "real";
+  modelKey: string; // `${provider}/${modelId}`，空字符串表示自动选择
+  thinking: ThinkingLevel;
+  gateway: { baseUrl: string; apiKey: string };
+}
 ```
+
+`init` / `reconnect` 的可选 `config` 只用于配置文件不存在时迁移旧版 nsh Storage；已有 `~/.pi-code/config.json` 始终优先。`save_config` 原子写入完整配置。`set_model` / `set_thinking` 成功后也会同步更新文件，避免设置窗口外的切换在重启后丢失。
 
 ### 3.2 bridge → 应用（响应）
 
@@ -127,6 +138,7 @@ interface ReadyInfo {
   sessionId?: string;
   sessionPath?: string;
   git?: { branch?: string };
+  config: AppConfig;
 }
 
 interface ModelInfo {
@@ -214,7 +226,8 @@ interface ReadFileInfo {
 
 | command | data |
 |---|---|
-| `init` / `reconnect` | `ReadyInfo` |
+| `init` / `reconnect` | `ReadyInfo`（含已加载的完整 `config`） |
+| `save_config` | `{ config: AppConfig }` |
 | `prompt` | `{ accepted: true }`（事件继续流） |
 | `abort` / `new_session` / `switch_session` | `{}` |
 | `list_sessions` | `{ sessions: SessionInfo[] }` |
@@ -286,6 +299,8 @@ interface ReadFileInfo {
 - `tests/store.test.tsx`：事件归约（文本流、工具卡片状态、usage、错误）单测（不 spawn）。
 - `tests/app.test.tsx`：`open("./tests/test-entry.tsx", { platform: "macos" })` 注入 FakeBridge（或直接使用 test-entry 的 mock store），验证欢迎页、发送消息、消息渲染、面板切换、设置弹窗。
 - `tests/e2e.test.tsx`：真实启动 bridge + pi + mock LLM（需要 `scripts/setup.mjs` 已完成），输入「创建一个演示文件」，等待工具卡片完成与助手回复，断言文件存在于临时工作区。
+- `server/test-config.mjs`：`AppConfig` 校验、原子写入（0600）、首次迁移、已有文件优先、损坏 JSON 不覆盖（`node --test`，不启动 pi）。
+- 配置隔离：`npm test` 通过 `scripts/test.mjs` 用临时 `PI_CODE_CONFIG_DIR` 运行 `nsh test`；`server/test-bridge.mjs` / `test-websocket.mjs` / `test-targets.mjs` 各自设置临时配置目录。真实 bridge 测试会在非 Demo 模式下提前失败，避免误用开发者的真实网关。两个真实 bridge 测试共用项目根工作区（其 `hello.ts` 已被 gitignore），因此共享同一份隔离配置也不冲突。
 - 视觉检查：`nsh test --target macos` + `app.screenshot(path)` 截屏，人工查看布局。
 
 ---
@@ -298,6 +313,8 @@ nsh run App.tsx     # 启动桌面应用
 nsh test            # 跑测试
 ```
 
-环境变量：真实 provider 的 API Key 通过 `ANTHROPIC_API_KEY` 等传入（nsh.json 已授权这些变量）。没有 Key 时自动进入 Demo 模式。
+配置由 bridge 统一保存在 `~/.pi-code/config.json`；桌面自定义 session dataDir 不会改变配置文件位置。启动时加载完整配置并恢复模型与 Thinking，设置窗口通过 `save_config` 保存全部字段，网关/工作区/模式变化通过 `reconnect` 立即生效。写入使用临时文件替换，API Key 不进入日志或生成的 `models.json`。
 
-自定义 OpenAI 兼容网关：设置 `OPENAI_BASE_URL` 与 `OPENAI_API_KEY`（可选 `OPENAI_MODEL`）。bridge 会请求 `${OPENAI_BASE_URL}/models` 自动发现模型，写入隔离的 `openai-gateway-agent/models.json`，并以 `openai-gateway` provider 启动 pi；`auto` 模式优先使用它，`demo` 模式忽略它。
+真实 pi 原生 provider 的 API Key 仍可通过 `ANTHROPIC_API_KEY` 等传入（nsh.json 已授权这些变量）。没有 Key 时自动进入 Demo 模式。
+
+自定义 OpenAI 兼容网关通常在设置窗口配置。首次无配置文件时可用 `OPENAI_BASE_URL` 与 `OPENAI_API_KEY`（可选 `OPENAI_MODEL`）提供初始值。bridge 请求 `${baseUrl}/models` 自动发现模型，写入隔离的 `openai-gateway-agent/models.json`，并以 `openai-gateway` provider 启动 pi；`auto` 模式优先使用它，`demo` 模式忽略它。

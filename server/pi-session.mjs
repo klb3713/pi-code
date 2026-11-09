@@ -196,6 +196,9 @@ export class PiSession {
     this.provider = options.provider;
     this.model = options.model;
     this.agentDir = options.agentDir;
+    // Custom gateways reference OPENAI_API_KEY in models.json. Inject the
+    // config-file value into this child only; never write it into models.json.
+    this.gatewayApiKey = options.gatewayApiKey;
     this.noSession = Boolean(options.noSession);
     this.onEvent = options.onEvent ?? (() => {});
     this.onExit = options.onExit ?? (() => {});
@@ -246,6 +249,11 @@ export class PiSession {
     } else {
       // Real mode must use pi's default agent directory (~/.pi/agent).
       delete env.PI_CODING_AGENT_DIR;
+    }
+    if (this.gatewayApiKey !== undefined) {
+      const apiKey = String(this.gatewayApiKey ?? "").trim();
+      if (apiKey) env.OPENAI_API_KEY = apiKey;
+      else delete env.OPENAI_API_KEY;
     }
     const child = spawn(process.execPath, this.buildArgs(), {
       cwd: this.cwd,

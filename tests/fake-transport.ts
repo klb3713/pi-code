@@ -1,5 +1,5 @@
 // A deterministic in-memory transport for UI tests and the dev harness.
-import type { BridgeEvent, BridgeResponse, ReadyInfo, RunMode } from "../app/protocol";
+import type { AppConfig, BridgeEvent, BridgeResponse, ModelInfo, ReadyInfo, RunMode } from "../app/protocol";
 import type { BridgeTransport } from "../app/store";
 
 export interface FakeOptions {
@@ -9,6 +9,10 @@ export interface FakeOptions {
   withTool?: boolean;
   files?: unknown[];
   sessions?: unknown[];
+  /** Simulates an unreachable gateway: auto mode falls back to Demo. */
+  gatewayFails?: boolean;
+  /** Number of init/reconnect requests that fail before the runtime starts. */
+  initFailures?: number;
 }
 
 const FILES = [
@@ -46,6 +50,8 @@ export function createFakeTransport(options: FakeOptions = {}): BridgeTransport 
   const delay = options.delayMs ?? 10;
   let workspace = options.workspace ?? "/tmp/pi-code-demo";
   let demo = true;
+  let savedConfig: AppConfig | null = null;
+  let initFailures = options.initFailures ?? 0;
 
   function emit(event: BridgeEvent): void {
     for (const listener of listeners) listener(event);
@@ -151,45 +157,74 @@ export function createFakeTransport(options: FakeOptions = {}): BridgeTransport 
       switch (type) {
         case "init":
         case "reconnect": {
-          demo = payload.mode !== "real";
-          workspace = String(payload.workspace ?? workspace);
+          if (initFailures > 0) {
+            initFailures -= 1;
+            return Promise.resolve({
+              id: `fake-${calls.length}`,
+              type: "response",
+              command: type,
+              success: false,
+              error: "WebSocket 连接失败：bridge 尚未就绪",
+            });
+          }
+          const fallback = payload.config as AppConfig | undefined;
+          const mode = savedConfig?.mode ?? fallback?.mode ?? (payload.mode === "real" ? "real" : "auto");
+          const gateway = savedConfig?.gateway ?? fallback?.gateway ?? { baseUrl: "", apiKey: "" };
+          const useGateway = !options.gatewayFails && mode !== "demo" && Boolean(gateway.baseUrl);
+          demo = mode === "demo" || (mode === "auto" && !useGateway);
+          workspace = String(savedConfig?.workspace ?? fallback?.workspace ?? payload.workspace ?? workspace);
+          const availableModels: ModelInfo[] = useGateway
+            ? [
+                { provider: "openai-gateway", id: "gateway-model-1", name: "Gateway Model 1", reasoning: true },
+                { provider: "openai-gateway", id: "gateway-model-2", name: "Gateway Model 2", reasoning: true },
+              ]
+            : [
+                {
+                  provider: demo ? "pi-demo" : "anthropic",
+                  id: demo ? "pi-demo-1" : "claude-sonnet-4-5",
+                  name: demo ? "Pi Demo 1" : "Claude Sonnet 4.5",
+                  contextWindow: 128000,
+                  maxTokens: 8192,
+                  reasoning: !demo,
+                },
+                {
+                  provider: demo ? "pi-demo" : "anthropic",
+                  id: demo ? "pi-demo-2" : "claude-opus-4-1",
+                  name: demo ? "Pi Demo 2" : "Claude Opus 4.1",
+                  contextWindow: 200000,
+                  maxTokens: 16384,
+                  reasoning: true,
+                },
+              ];
+          const configuredKey = savedConfig?.modelKey ?? fallback?.modelKey ?? "";
+          const currentModel =
+            availableModels.find((item) => `${item.provider}/${item.id}` === configuredKey) ?? availableModels[0]!;
+          const config: AppConfig = {
+            workspace,
+            mode,
+            modelKey: `${currentModel.provider}/${currentModel.id}`,
+            thinking: savedConfig?.thinking ?? fallback?.thinking ?? "off",
+            gateway: { ...gateway },
+          };
+          savedConfig = config;
           const ready: ReadyInfo = {
             workspace,
             mode: demo ? "demo" : "real",
             demo,
             piVersion: "1.5.0",
-            models: [
-              {
-                provider: demo ? "pi-demo" : "anthropic",
-                id: demo ? "pi-demo-1" : "claude-sonnet-4-5",
-                name: demo ? "Pi Demo 1" : "Claude Sonnet 4.5",
-                contextWindow: 128000,
-                maxTokens: 8192,
-                reasoning: !demo,
-              },
-              {
-                provider: demo ? "pi-demo" : "anthropic",
-                id: demo ? "pi-demo-2" : "claude-opus-4-1",
-                name: demo ? "Pi Demo 2" : "Claude Opus 4.1",
-                contextWindow: 200000,
-                maxTokens: 16384,
-                reasoning: true,
-              },
-            ],
-            currentModel: {
-              provider: demo ? "pi-demo" : "anthropic",
-              id: demo ? "pi-demo-1" : "claude-sonnet-4-5",
-              name: demo ? "Pi Demo 1" : "Claude Sonnet 4.5",
-              contextWindow: 128000,
-              maxTokens: 8192,
-              reasoning: !demo,
-            },
-            thinkingLevel: "off",
+            models: availableModels,
+            currentModel,
+            thinkingLevel: config.thinking,
             sessionId: "fake-session",
             sessionPath: `${workspace}/.pi/sessions/fake.jsonl`,
+            config,
           };
           later(() => emit({ type: "ready", data: ready }));
           return ok(ready);
+        }
+        case "save_config": {
+          savedConfig = payload.config as AppConfig;
+          return ok({ config: savedConfig });
         }
         case "prompt": {
           const message = String(payload.message ?? "");
@@ -210,12 +245,16 @@ export function createFakeTransport(options: FakeOptions = {}): BridgeTransport 
         case "set_model": {
           const provider = String(payload.provider ?? "pi-demo");
           const id = String(payload.modelId ?? "pi-demo-1");
+          if (savedConfig) savedConfig = { ...savedConfig, modelKey: `${provider}/${id}` };
           return ok({
             model: { provider, id, name: id },
-            thinkingLevel: "off",
+            thinkingLevel: savedConfig?.thinking ?? "off",
           });
         }
         case "set_thinking":
+          if (savedConfig) {
+            savedConfig = { ...savedConfig, thinking: payload.level as AppConfig["thinking"] };
+          }
           return ok({ level: payload.level });
         case "list_files":
           return Promise.resolve({

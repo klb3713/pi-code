@@ -2,7 +2,20 @@
 import { effect, keymap, Text, View } from "nsh";
 import { Button } from "nsh/base";
 import { isAvailable, Window } from "nsh/desktop";
-import { actions, bootError, bootstrap, phase, rightPanelOpen, settingsOpen, shutdown, sidebarOpen, toast, workspace } from "./store";
+import {
+  actions,
+  bootError,
+  bootstrap,
+  phase,
+  reconnect,
+  rightPanelOpen,
+  settings,
+  settingsOpen,
+  shutdown,
+  sidebarOpen,
+  toast,
+  workspace,
+} from "./store";
 import { basename } from "./lib/format";
 import { ChatView } from "./components/chat/ChatView";
 import { RightPanel, SettingsDialog } from "./components/panels/RightPanel";
@@ -70,6 +83,12 @@ export function App() {
             <View class="flex-row items-center gap-2 border-b border-destructive/40 bg-destructive/10 px-4 py-2">
               <Text class="text-[11px] font-medium text-destructive">连接失败</Text>
               <Text class="flex-1 truncate text-[11px] text-destructive">{bootError() || "无法启动 pi bridge"}</Text>
+              <Button
+                onPress={() => void reconnect(workspace(), settings().mode)}
+                class="rounded-md border border-destructive/40 px-2 py-1 transition-colors hover:bg-destructive/15 active:bg-destructive/20"
+              >
+                <Text class="text-[10px] text-destructive">重试连接</Text>
+              </Button>
               <Button
                 onPress={() => settingsOpen.set(true)}
                 class="rounded-md border border-destructive/40 px-2 py-1 transition-colors hover:bg-destructive/15 active:bg-destructive/20"

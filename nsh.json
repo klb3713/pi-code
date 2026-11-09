@@ -53,7 +53,8 @@
         "KIMI_API_KEY",
         "MINIMAX_API_KEY",
         "OPENAI_BASE_URL",
-        "OPENAI_MODEL"
+        "OPENAI_MODEL",
+        "PI_CODE_CONFIG_DIR"
       ]
     },
     "fs": {

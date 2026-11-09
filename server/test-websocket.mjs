@@ -121,6 +121,10 @@ class Client {
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "pi-code-ws-workspace-"));
 const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-code-ws-data-"));
+// Each bridge child inherits this env, so the test never touches
+// the developer's ~/.pi-code/config.json.
+const configDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-code-ws-config-"));
+process.env.PI_CODE_CONFIG_DIR = configDir;
 await fs.writeFile(path.join(workspace, "seed.txt"), "websocket seed\n", "utf8");
 let service;
 let first;
@@ -247,11 +251,13 @@ try {
   if (first) first.socket.terminate();
   if (second) second.socket.terminate();
   if (service) await service.close();
+  delete process.env.PI_CODE_CONFIG_DIR;
   if (failures === 0) {
     await fs.rm(workspace, { recursive: true, force: true });
     await fs.rm(dataDir, { recursive: true, force: true });
+    await fs.rm(configDir, { recursive: true, force: true });
   } else {
-    console.error(`work dirs kept: ${workspace} ${dataDir}`);
+    console.error(`work dirs kept: ${workspace} ${dataDir} ${configDir}`);
   }
 }
 

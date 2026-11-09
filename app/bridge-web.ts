@@ -79,7 +79,10 @@ export class WebSocketBridgeTransport implements BridgeTransport {
       if (this.socket === socket) this.handleMessage(event.data);
     };
     socket.onerror = (event) => {
-      if (this.socket === socket) this.connectionError = event.message || "WebSocket 连接失败";
+      if (this.socket !== socket) return;
+      this.connectionError =
+        event.message ||
+        `WebSocket 连接失败：请确认本机 bridge 已启动，并用 http://127.0.0.1:8790 打开页面（其他来源会被拒绝）`;
     };
     socket.onclose = (event) => {
       if (this.socket !== socket) return;

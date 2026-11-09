@@ -66,8 +66,12 @@ export class BridgeClient {
     if (!child) throw lastError;
     this.child = child;
     child.on("stdout", (line: string) => this.handleLine(line));
+    // The bridge reserves stdout for protocol records and logs diagnostics to
+    // stderr, already prefixed with `[bridge]` / `[pi]`. Forward them as plain
+    // logs so expected startup output is not rendered as errors by the host;
+    // real failures arrive as protocol `error` events and exit reports.
     child.on("stderr", (line: string) => {
-      if (line.trim()) console.error(`[bridge] ${line}`);
+      if (line.trim()) console.log(line);
     });
     child.on("exit", (result) => {
       this.child = null;

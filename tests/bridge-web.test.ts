@@ -96,6 +96,19 @@ test("web transport rejects pending requests and reports an unexpected close", a
   expect(exits).toEqual([{ code: 1006, signal: null, error: "Connection refused" }]);
 });
 
+test("web transport reports an actionable message when the socket fails silently", async () => {
+  const { transport, sockets } = setup();
+  transport.start("/tmp/workspace", "demo");
+  const request = transport.request("init", {});
+  const socket = sockets[0]!;
+  socket.fail("");
+  socket.serverClose(1006, "");
+
+  await expect(request).rejects.toThrow("WebSocket 连接失败");
+  await expect(request).rejects.toThrow("127.0.0.1:8790");
+  transport.stop(true);
+});
+
 test("web transport ignores stale socket events after restart", async () => {
   const { transport, sockets } = setup();
   const exits: unknown[] = [];

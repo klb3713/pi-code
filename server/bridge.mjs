@@ -6,6 +6,12 @@ import { existsSync, readFileSync, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import {
+  loadOrMigrateConfig,
+  normalizeAppConfig,
+  parseModelKey,
+  saveConfig as writeConfig,
+} from "./config.mjs";
 import { startMockLlm } from "./mock-llm.mjs";
 import {
   PI_VERSION,
@@ -65,6 +71,7 @@ class Bridge {
     this.promptInFlight = false;
     this.shuttingDown = false;
     this.readyInfo = null;
+    this.config = null;
   }
 
   dataRootFor(dataDir) {
@@ -86,6 +93,7 @@ class Bridge {
       agentDir: options.agentDir,
       provider: options.provider,
       model: options.model,
+      gatewayApiKey: options.gatewayApiKey,
       noSession: Boolean(options.noSession),
       onEvent: (event) => this.handlePiEvent(event),
       onExit: (info) => {
@@ -180,11 +188,11 @@ class Bridge {
     this.effectiveMode = "real";
   }
 
-  /** OpenAI-compatible gateway configuration from the process environment. */
+  /** OpenAI-compatible gateway configuration from the persisted AppConfig. */
   gatewaySettings() {
-    const baseUrl = String(process.env.OPENAI_BASE_URL ?? "").trim().replace(/\/+$/, "");
-    if (!baseUrl) return null;
-    return { baseUrl, apiKey: String(process.env.OPENAI_API_KEY ?? "").trim() };
+    const gateway = this.config?.gateway;
+    if (!gateway?.baseUrl) return null;
+    return { baseUrl: gateway.baseUrl, apiKey: gateway.apiKey };
   }
 
   /**
@@ -245,7 +253,8 @@ class Bridge {
       .filter(Boolean)
       .slice(0, 100);
     if (models.length === 0) throw new Error(`${settings.baseUrl}/models 没有返回任何模型`);
-    const configured = String(process.env.OPENAI_MODEL ?? "").trim();
+    const selected = parseModelKey(this.config?.modelKey);
+    const configured = selected?.provider === "openai-gateway" ? selected.modelId : "";
     let defaultModel = models.find((model) => model.id === configured);
     if (!defaultModel && configured) {
       // A gateway may accept model IDs its /models endpoint does not list.
@@ -319,12 +328,21 @@ class Bridge {
    * Boots (or reboots) the runtime for an init/reconnect request.
    * Auto mode probes pi's real model list first and falls back to demo.
    */
-  async boot(workspace, dataDir, mode) {
+  async boot(request) {
+    // Saved config is authoritative. request.config is only a one-time
+    // migration default when ~/.pi-code/config.json does not exist yet.
+    const { config } = await loadOrMigrateConfig({
+      workspace: request.workspace,
+      mode: normalizeMode(request.mode),
+      ...(Object.hasOwn(request, "config") ? { config: request.config } : {}),
+    });
+    const { workspace, mode } = config;
+    this.config = config;
     this.shuttingDown = false;
     this.promptInFlight = false;
     this.workspace = resolveWorkspace(workspace);
     await fs.mkdir(this.workspace, { recursive: true });
-    this.dataRoot = this.dataRootFor(dataDir);
+    this.dataRoot = this.dataRootFor(request.dataDir);
     this.requestedMode = mode;
     await this.ensureDirectories();
 
@@ -346,6 +364,7 @@ class Bridge {
           agentDir: gateway.agentDir,
           provider: gateway.provider,
           model: gateway.model,
+          gatewayApiKey: gatewaySettings.apiKey,
         });
         gatewayStarted = true;
         this.gatewayInfo = gateway;
@@ -399,7 +418,7 @@ class Bridge {
       }
     }
 
-    const state = await this.pi.getState();
+    let state = await this.pi.getState();
     const modelsRaw = await this.pi.getAvailableModels();
     let models = modelsRaw.map(mapModel).filter((model) => isUsableModel(model));
     if (this.gatewayInfo) {
@@ -411,6 +430,23 @@ class Bridge {
       await this.stopRuntime();
       throw new Error("真实模式下没有可用模型：请先在 pi 中配置 provider（~/.pi/agent/auth.json 或 models.json）");
     }
+
+    // Restore the persisted defaults before announcing ready. Gateway model
+    // selection already happened through --provider/--model in prepareGateway.
+    const selected = parseModelKey(this.config.modelKey);
+    if (!this.gatewayInfo && selected) {
+      const available = models.some((model) => model.provider === selected.provider && model.id === selected.modelId);
+      const currentKey = state.model ? `${state.model.provider}/${state.model.id}` : "";
+      if (available && currentKey !== this.config.modelKey) {
+        await this.pi.setModel(selected.provider, selected.modelId);
+        state = await this.pi.getState();
+      }
+    }
+    if ((state.thinkingLevel ?? "off") !== this.config.thinking) {
+      await this.pi.setThinking(this.config.thinking);
+      state = await this.pi.getState();
+    }
+
     const currentModel = mapModel(state.model);
     const branch = (await gitStatus(this.workspace)).branch;
     const ready = {
@@ -421,6 +457,7 @@ class Bridge {
       models,
       ...(currentModel && isUsableModel(currentModel) ? { currentModel } : {}),
       thinkingLevel: state.thinkingLevel ?? "off",
+      config: this.config,
       ...(state.sessionId ? { sessionId: String(state.sessionId) } : {}),
       ...(state.sessionFile ? { sessionPath: String(state.sessionFile) } : {}),
       ...(branch ? { git: { branch } } : {}),
@@ -432,6 +469,19 @@ class Bridge {
     emit({ type: "status", status: "ready" });
     await this.emitHistory();
     return ready;
+  }
+
+  async persistConfig(value) {
+    const normalized = normalizeAppConfig(value);
+    const config = await writeConfig(normalized);
+    this.config = config;
+    if (this.readyInfo) this.readyInfo = { ...this.readyInfo, config };
+    return config;
+  }
+
+  requireConfig() {
+    if (!this.config) throw new Error("bridge 尚未加载配置：请先发送 init 请求");
+    return this.config;
   }
 
   sessionFields(state) {
@@ -551,12 +601,14 @@ const bridge = new Bridge();
 
 const commands = {
   async init(request) {
-    const ready = await bridge.boot(request.workspace, request.dataDir, normalizeMode(request.mode));
-    return ready;
+    return bridge.boot(request);
   },
   async reconnect(request) {
-    const ready = await bridge.boot(request.workspace, request.dataDir, normalizeMode(request.mode));
-    return ready;
+    return bridge.boot(request);
+  },
+  async save_config(request) {
+    const config = await bridge.persistConfig(request.config);
+    return { config };
   },
   async prompt(request) {
     const session = bridge.requireSession();
@@ -610,6 +662,7 @@ const commands = {
     const model = await session.setModel(provider, modelId);
     const state = await session.getState();
     const mapped = mapModel(model) ?? mapModel(state.model);
+    await bridge.persistConfig({ ...bridge.requireConfig(), modelKey: `${provider}/${modelId}` });
     return { ...(mapped ? { model: mapped } : {}), thinkingLevel: state.thinkingLevel ?? "off" };
   },
   async get_state() {
@@ -628,6 +681,7 @@ const commands = {
     const session = bridge.requireSession();
     const level = String(request.level ?? "");
     const result = await session.setThinking(level);
+    await bridge.persistConfig({ ...bridge.requireConfig(), thinking: result.level });
     return { level: result.level };
   },
   async list_files(request) {
