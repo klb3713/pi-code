@@ -4,3 +4,4 @@ server/node_modules/
 *.log
 .DS_Store
 .e2e-workspace/
+hello.ts
