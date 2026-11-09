@@ -19,8 +19,8 @@ Pi Code 是一个 Claude Code 桌面版风格的 AI coding 应用：
 4. **变更面板**：Changes 标签页，列出本次会话改动 / git 变更，+/− 行数，点击查看 DiffView。
 5. **会话**：新会话、最近会话列表（读取 pi session 文件）、切换会话。
 6. **模型**：模型选择器（来自 pi `get_available_models`；Demo 模式为 `pi-demo-1`）、thinking level。
-7. **设置**：工作区路径、运行模式（auto/demo/real）、默认模型、thinking level、自定义 OpenAI 兼容网关；所有配置保存到 `~/.pi-code/config.json`，应用后可重连，无需重启应用。
-8. **桌面外观**：自定义标题栏（`Window.setTitleBar({style:"hidden", height:44})`）、左侧栏、主聊天区、右侧面板、底部状态栏；Claude Code 风格深色主题（暖橙 #d97757）。
+7. **设置**：工作区路径、运行模式（auto/demo/real）、默认模型、thinking level、外观（深色 / 浅色 / 跟随系统）、自定义 OpenAI 兼容网关；所有配置保存到 `~/.pi-code/config.json`，应用后可重连，无需重启应用。
+8. **桌面外观**：自定义标题栏（`Window.setTitleBar({style:"hidden", height:44})`）、左侧栏、主聊天区、右侧面板、底部状态栏；Claude Code 风格深色 / 浅色主题（深色暖橙 #d97757，浅色 clay #c6613f，可跟随系统）。
 
 非目标（v1 不做）：多点编辑审批、附件上传、终端面板、多窗口、移动端适配、插件市场。
 
@@ -80,14 +80,19 @@ type BridgeRequest =
 
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
+type ThemePreference = "dark" | "light" | "system";
+
 interface AppConfig {
   workspace: string;
   mode: "auto" | "demo" | "real";
   modelKey: string; // `${provider}/${modelId}`，空字符串表示自动选择
   thinking: ThinkingLevel;
+  theme: ThemePreference; // 缺省为 "dark"；旧配置缺少该字段时迁移为 "dark"
   gateway: { baseUrl: string; apiKey: string };
 }
 ```
+
+`theme` 控制外观：`"dark"` / `"light"` 固定主题，`"system"` 跟随操作系统外观。默认 `"dark"`；旧配置缺少该字段时按 `"dark"` 迁移，不需要用户重新保存。
 
 `init` / `reconnect` 的可选 `config` 只用于配置文件不存在时迁移旧版 nsh Storage；已有 `~/.pi-code/config.json` 始终优先。`save_config` 原子写入完整配置。`set_model` / `set_thinking` 成功后也会同步更新文件，避免设置窗口外的切换在重启后丢失。
 
@@ -263,8 +268,10 @@ interface ReadFileInfo {
 ## 5. 视觉规范（Claude Code 桌面风）
 
 - 背景 `bg-background`，侧栏 `bg-sidebar`，卡片 `bg-card`，边框 `border-border`。
-- 强调色 `text-primary` / `bg-primary`（暖橙 #d97757）；主按钮用 primary。
+- 强调色 `text-primary` / `bg-primary`（深色暖橙 #d97757，浅色 clay #c6613f）；主按钮用 primary。
 - 次要文本 `text-muted-foreground`；成功 `text-success`；错误 `text-destructive`；警告 `text-warning`。
+- 浅色主题（Claude Code 浅色）：象牙白页面 `#faf9f5`，石板墨色文字 `#141413`，白色卡片 `#ffffff`，暖灰边框 `#e8e6dc`，clay 强调色 `#c6613f`（brand #d97757）。
+- 深浅色共用同一套语义 token：页面 `bg-background`、卡片 `bg-card`、次级面 `bg-surface` / `bg-surface-raised`、代码块 `bg-code` / `text-code-foreground`；组件里不写死 hex，两种外观才能同时成立。
 - 圆角：卡片 `rounded-(--radius)`，面板 `rounded-(--radius-card)`。
 - 字体：正文 `text-[13px]`，次要 `text-[11px]`，代码 `font-mono`。
 - 布局尺寸：自定义标题栏 44pt；左侧栏 260pt；右侧面板 320pt；底部状态栏 28pt。
@@ -297,7 +304,7 @@ interface ReadFileInfo {
 ## 7. 测试策略
 
 - `tests/store.test.tsx`：事件归约（文本流、工具卡片状态、usage、错误）单测（不 spawn）。
-- `tests/app.test.tsx`：`open("./tests/test-entry.tsx", { platform: "macos" })` 注入 FakeBridge（或直接使用 test-entry 的 mock store），验证欢迎页、发送消息、消息渲染、面板切换、设置弹窗。
+- `tests/app.test.tsx`：`open("./test-entry.tsx", { platform: "macos" })` 注入 FakeBridge（或直接使用 test-entry 的 mock store），验证欢迎页、发送消息、消息渲染、面板切换、设置弹窗。
 - `tests/e2e.test.tsx`：真实启动 bridge + pi + mock LLM（需要 `scripts/setup.mjs` 已完成），输入「创建一个演示文件」，等待工具卡片完成与助手回复，断言文件存在于临时工作区。
 - `server/test-config.mjs`：`AppConfig` 校验、原子写入（0600）、首次迁移、已有文件优先、损坏 JSON 不覆盖（`node --test`，不启动 pi）。
 - 配置隔离：`npm test` 通过 `scripts/test.mjs` 用临时 `PI_CODE_CONFIG_DIR` 运行 `nsh test`；`server/test-bridge.mjs` / `test-websocket.mjs` / `test-targets.mjs` 各自设置临时配置目录。真实 bridge 测试会在非 Demo 模式下提前失败，避免误用开发者的真实网关。两个真实 bridge 测试共用项目根工作区（其 `hello.ts` 已被 gitignore），因此共享同一份隔离配置也不冲突。

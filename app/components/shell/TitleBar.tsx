@@ -23,13 +23,13 @@ export function TitleBar() {
       </View>
       <View class="flex-1" />
       <View class="flex-row items-center gap-1.5">
-        <View class="flex-row items-center gap-1 rounded-full border border-border bg-[#181816] px-2 py-0.5">
+        <View class="flex-row items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5">
           <StatusDot tone={connection() === "connected" ? "success" : connection() === "connecting" ? "warning" : "error"} />
           <Text class="text-[10px] text-muted-foreground">
             {connection() === "connected" ? "pi 已连接" : connection() === "connecting" ? "连接中" : "未连接"}
           </Text>
         </View>
-        <View class="flex-row items-center gap-1 rounded-full border border-border bg-[#181816] px-2 py-0.5">
+        <View class="flex-row items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5">
           <Glyph symbol="⎇" size={10} />
           <Text class="text-[10px] text-muted-foreground">{runMode() === "demo" ? "Demo" : "Live"}</Text>
         </View>

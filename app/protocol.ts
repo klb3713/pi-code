@@ -5,6 +5,9 @@ export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhi
 
 export type RunMode = "auto" | "demo" | "real";
 
+/** The appearance the app draws itself in; "system" follows the OS. */
+export type ThemePreference = "dark" | "light" | "system";
+
 export interface GatewayConfig {
   baseUrl: string;
   apiKey: string;
@@ -16,6 +19,7 @@ export interface AppConfig {
   mode: RunMode;
   modelKey: string;
   thinking: ThinkingLevel;
+  theme: ThemePreference;
   gateway: GatewayConfig;
 }
 

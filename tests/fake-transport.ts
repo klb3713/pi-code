@@ -204,6 +204,7 @@ export function createFakeTransport(options: FakeOptions = {}): BridgeTransport 
             mode,
             modelKey: `${currentModel.provider}/${currentModel.id}`,
             thinking: savedConfig?.thinking ?? fallback?.thinking ?? "off",
+            theme: savedConfig?.theme ?? fallback?.theme ?? "dark",
             gateway: { ...gateway },
           };
           savedConfig = config;

@@ -459,20 +459,23 @@ async function main() {
             mode: "real",
             modelKey: "",
             thinking: "medium",
+            theme: "light",
             gateway: { baseUrl: `${gatewayMock.url}/v1/`, apiKey: "gateway-test-key" },
           },
         });
         assert(response.success, `save_config 失败：${response.error}`);
         assert(response.data?.config?.gateway?.baseUrl === `${gatewayMock.url}/v1`, "响应未规范化网关地址");
+        assert(response.data?.config?.theme === "light", `响应未回传 theme=light：${JSON.stringify(response.data?.config?.theme)}`);
         const saved = JSON.parse(await fs.readFile(configFile, "utf8"));
         assert(saved.mode === "real", `mode 应持久化为 real，实际 ${saved.mode}`);
         assert(saved.thinking === "medium", `thinking 应持久化，实际 ${saved.thinking}`);
+        assert(saved.theme === "light", `theme 应持久化为 light，实际 ${saved.theme}`);
         assert(saved.workspace === workspace, "workspace 未持久化");
         assert(saved.gateway.baseUrl === `${gatewayMock.url}/v1`, "gateway.baseUrl 未持久化");
         assert(saved.gateway.apiKey === "gateway-test-key", "gateway.apiKey 未持久化");
         const stat = await fs.stat(configFile);
         assert((stat.mode & 0o777) === 0o600, `config.json 权限应为 600，实际 ${(stat.mode & 0o777).toString(8)}`);
-        return `config.json (${(stat.mode & 0o777).toString(8)}) workspace/mode/thinking/gateway`;
+        return `config.json (${(stat.mode & 0o777).toString(8)}) workspace/mode/thinking/theme/gateway`;
       });
 
       await check("reconnect uses the saved gateway and returns its config", async () => {
@@ -488,6 +491,7 @@ async function main() {
               mode: "demo",
               modelKey: "",
               thinking: "off",
+              theme: "dark",
               gateway: { baseUrl: "", apiKey: "" },
             },
           },
@@ -498,6 +502,7 @@ async function main() {
         assert(data.mode === "real", `应使用保存的 real 模式，实际 ${data.mode}`);
         assert(data.config?.gateway?.baseUrl === `${gatewayMock.url}/v1`, "ReadyInfo.config 未回传保存的网关");
         assert(data.config?.thinking === "medium", "ReadyInfo.config 未回传保存的 thinking");
+        assert(data.config?.theme === "light", `ReadyInfo.config 应回传保存的 theme=light，实际 ${data.config?.theme}`);
         // pi clamps thinking to what the model supports; the mock gateway model
         // is not a reasoning model, so the effective level is off while the
         // saved preference stays medium.

@@ -1,5 +1,5 @@
 // Application state for Pi Code. One reactive store, reduced from bridge events.
-import { computed, signal, Storage } from "nsh";
+import { computed, setColorScheme, signal, Storage } from "nsh";
 import { isAvailable as isDesktop } from "nsh/desktop";
 import process from "process";
 import fs from "fs/promises";
@@ -21,6 +21,7 @@ import {
   type ReadFileInfo,
   type RunMode,
   type SessionInfo,
+  type ThemePreference,
   type ThinkingLevel,
   type ToolCallInfo,
   type UiContent,
@@ -129,8 +130,31 @@ export const settings = signal<SettingsState>({
   mode: "auto",
   modelKey: "",
   thinking: "off",
+  theme: "dark",
   gateway: { baseUrl: "", apiKey: "" },
 });
+
+const THEME_STORAGE_KEY = "pi-code.theme";
+
+function isThemePreference(value: string | null): value is ThemePreference {
+  return value === "dark" || value === "light" || value === "system";
+}
+
+// The appearance the app is actually drawing in. Form edits in the settings
+// dialog only touch `settings().theme`, so a failed save must revert to this
+// rather than to the pending form value.
+let appliedTheme: ThemePreference = "dark";
+
+/**
+ * Switches the whole app appearance at once (nsh follows it for classes, the
+ * components' theme and platform controls) and remembers it locally, so the
+ * next launch paints the right appearance before the bridge answers.
+ */
+export function applyThemePreference(theme: ThemePreference): void {
+  appliedTheme = theme;
+  setColorScheme(theme);
+  void Storage.setItem(THEME_STORAGE_KEY, theme).catch(() => {});
+}
 
 // Last configuration actually used by a ready runtime. Form edits live only in
 // `settings` until they are saved, so this is also the reconnect comparison base.
@@ -474,6 +498,7 @@ function applyReady(info: ReadyInfo): void {
     // Keep the saved preference in the form: pi may clamp the effective level
     // (e.g. a non-reasoning model), and a later save must not drop it.
     thinking: saved?.thinking ?? info.thinkingLevel ?? "off",
+    theme: saved?.theme ?? settings().theme,
     gateway: {
       baseUrl: saved?.gateway?.baseUrl ?? settings().gateway.baseUrl,
       apiKey: saved?.gateway?.apiKey ?? settings().gateway.apiKey,
@@ -491,6 +516,7 @@ function applyReady(info: ReadyInfo): void {
   bootError.set("");
   settingsError.set("");
   settings.set(nextConfig);
+  applyThemePreference(nextConfig.theme);
   if (info.git?.branch) git.update((current) => ({ ...current, branch: info.git?.branch }));
   if (info.sessionId) {
     sessions.update((list) => list);
@@ -578,6 +604,11 @@ export async function bootstrap(): Promise<void> {
   const storedMode = (await Storage.getItem("pi-code.mode").catch(() => null)) as RunMode | null;
   const storedThinking = (await Storage.getItem("pi-code.thinking").catch(() => null)) as ThinkingLevel | null;
   const storedModel = await Storage.getItem("pi-code.model").catch(() => null);
+  const storedTheme = await Storage.getItem(THEME_STORAGE_KEY).catch(() => null);
+  // Paint the remembered appearance before the bridge answers; the saved
+  // config's theme takes over once the runtime is ready.
+  const theme: ThemePreference = isThemePreference(storedTheme) ? storedTheme : "dark";
+  applyThemePreference(theme);
   let ws = storedWorkspace || defaultWorkspace;
   // Browser fs is OPFS, not the Node host's filesystem. Validate it in the bridge.
   if (isDesktop && storedWorkspace && storedWorkspace !== DEFAULT_WORKSPACE) {
@@ -590,6 +621,7 @@ export async function bootstrap(): Promise<void> {
     workspace: ws,
     mode,
     thinking: storedThinking ?? "off",
+    theme,
     modelKey: storedModel ?? "",
     gateway: { ...settings().gateway },
   });
@@ -703,6 +735,8 @@ export const actions = {
     if (settingsSaving()) return;
     settingsSaving.set(true);
     settingsError.set("");
+    const previousTheme = appliedTheme;
+    let persisted = false;
     try {
       const current = settings();
       const next: AppConfig = {
@@ -714,8 +748,12 @@ export const actions = {
         },
       };
       settings.set(next);
+      // Appearance needs no reconnect: apply it at once so the dialog shows the
+      // result while the config is written.
+      applyThemePreference(next.theme);
       const saved = await transport.request("save_config", { config: next }, 20_000);
       if (!saved.success) throw new Error(saved.error ?? "保存配置失败");
+      persisted = true;
 
       const workspaceChanged = next.workspace !== workspace();
       const modeChanged = activeConfig ? next.mode !== activeConfig.mode : next.mode !== runMode();
@@ -753,6 +791,8 @@ export const actions = {
       settingsOpen.set(false);
       showToast(shouldReconnect ? "设置已保存，运行时已重新连接" : "设置已保存", "success");
     } catch (error) {
+      // The save never landed: put the appearance back with the old config.
+      if (!persisted) applyThemePreference(previousTheme);
       const message = error instanceof Error ? error.message : String(error);
       settingsError.set(message);
       showToast(`保存设置失败：${message}`, "error");

@@ -12,6 +12,9 @@ import path from "node:path";
 export const CONFIG_FILENAME = "config.json";
 export const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 export const RUN_MODES = new Set(["auto", "demo", "real"]);
+export const THEME_PREFERENCES = new Set(["dark", "light", "system"]);
+/** The appearance Pi Code started with; older config files without `theme` keep it. */
+export const DEFAULT_THEME = "dark";
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -33,6 +36,19 @@ export function normalizeThinking(value) {
   const level = typeof value === "string" ? value.trim() : "";
   if (!THINKING_LEVELS.has(level)) throw new Error(`无效的 thinking level：${String(value ?? "(缺少 thinking)")}`);
   return level;
+}
+
+/**
+ * Normalizes the appearance preference. A missing value is the historical dark
+ * theme, so config files written before the light theme existed still load.
+ */
+export function normalizeTheme(value) {
+  if (value === undefined || value === null) return DEFAULT_THEME;
+  const theme = typeof value === "string" ? value.trim() : "";
+  if (!THEME_PREFERENCES.has(theme)) {
+    throw new Error(`无效的外观设置：${String(value)}（应为 dark / light / system）`);
+  }
+  return theme;
 }
 
 /** Normalizes the shared provider/modelId key while allowing slashes in IDs. */
@@ -100,6 +116,7 @@ export function normalizeAppConfig(value) {
     mode: normalizeMode(value.mode),
     modelKey: normalizeModelKey(value.modelKey),
     thinking: normalizeThinking(value.thinking),
+    theme: normalizeTheme(value.theme),
     gateway: normalizeGateway(value.gateway),
   };
 }
@@ -183,6 +200,7 @@ export async function loadOrMigrateConfig(request, options = {}) {
     mode: legacy.mode ?? request.mode ?? "auto",
     modelKey: migratedModelKey(legacy.modelKey, env),
     thinking: legacy.thinking ?? "off",
+    theme: normalizeTheme(legacy.theme),
     gateway: legacyBaseUrl
       ? { baseUrl: legacyBaseUrl, apiKey: legacyGateway.apiKey ?? "" }
       : { baseUrl: environmentalBaseUrl, apiKey: environmentalKey },

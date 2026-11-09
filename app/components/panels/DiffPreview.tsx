@@ -28,7 +28,7 @@ export function DiffPreview() {
         <Text class="flex-1 truncate text-[11px] font-medium text-sidebar-foreground" style={{ minWidth: 0 }}>
           {activeDiff()?.path ?? ""}
         </Text>
-        <Text class="font-mono text-[10px] text-green-400">+{stats().additions}</Text>
+        <Text class="font-mono text-[10px] text-success">+{stats().additions}</Text>
         <Text class="font-mono text-[10px] text-destructive">−{stats().deletions}</Text>
         <IconButton symbol="✕" label="关闭差异预览" onPress={() => activeDiff.set(null)} size={24} />
       </View>

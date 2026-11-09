@@ -13,7 +13,7 @@ Pi Code 用 [pi](https://github.com/earendil-works/pi)（`@earendil-works/pi-cod
 - **工作区文件树**：右侧 Files 面板浏览、展开目录、打开只读文件预览（行号 + 等宽字体）。
 - **变更与 Diff**：Changes 面板汇总本次会话/git 变更，点击用 `DiffView` 查看 unified diff。
 - **会话管理**：新建会话、最近会话列表、切换历史会话（读取 pi session 文件）。
-- **模型与设置**：默认模型选择、thinking level、工作区路径、运行模式（auto / demo / real）、自定义 OpenAI 兼容网关；全部设置持久化到 `~/.pi-code/config.json`。
+- **模型与设置**：默认模型选择、thinking level、工作区路径、运行模式（auto / demo / real）、外观（深色 / 浅色 / 跟随系统）、自定义 OpenAI 兼容网关；全部设置持久化到 `~/.pi-code/config.json`。
 - **桌面体验**：自定义标题栏（macOS 红绿灯内嵌）、三栏布局、状态栏（模型 / token / 成本 / 分支）、⌘N / ⌘, / ⌘B 快捷键。
 - **Demo 模式**：没有配置真实 provider 时自动启动本地 OpenAI-compatible Mock LLM——**pi 的 agent loop 与工具执行仍然是真实的**，只有模型回复由本地脚本生成，便于开箱即用与端到端测试。
 
@@ -95,7 +95,7 @@ npm run test:launcher # 一键启动、Ctrl+C 清理、端口冲突与 UI 退出
 
 bridge 会请求 `${Base URL}/models` 并刷新「默认模型」下拉框。选择模型并再次保存，即可把它设为之后启动时使用的默认模型。状态栏显示 `LIVE`，模型 chip 显示当前网关模型。
 
-所有设置（工作区、运行模式、默认模型、Thinking、网关地址与密钥）统一保存在 **`~/.pi-code/config.json`**，桌面与 Web 传输都由本机 bridge 读写同一份文件。API Key 只通过本机 bridge 使用，不会显示在日志中；请像对待其他本机凭据文件一样保护该配置。
+所有设置（工作区、运行模式、默认模型、Thinking、外观、网关地址与密钥）统一保存在 **`~/.pi-code/config.json`**，桌面与 Web 传输都由本机 bridge 读写同一份文件。API Key 只通过本机 bridge 使用，不会显示在日志中；请像对待其他本机凭据文件一样保护该配置。
 
 首次启动仍会读取 `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` 作为初始网关配置，旧版 nsh Storage 中的工作区、模式、模型与 Thinking 也会迁移。配置文件一旦存在便以文件为准，之后在设置窗口修改即可，不再依赖启动环境变量。
 
@@ -162,7 +162,7 @@ server/
   test-targets.mjs      真正 web / macOS host 的启动验证
 scripts/setup.mjs       安装 server 依赖、生成本机路径
 tests/                  nsh 测试（fake transport + 真实 e2e）
-theme.json              Claude 风格深色主题 tokens
+theme.json              Claude 风格深色 / 浅色主题 tokens
 nsh.json                nsh 应用配置、Tailwind 扩展、capabilities
 ```
 

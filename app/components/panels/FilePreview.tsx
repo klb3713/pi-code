@@ -55,11 +55,11 @@ export function FilePreview() {
 
       {truncated() ? (
         <View class="border-t border-border px-2 py-1">
-          <Text class="text-[10px] text-amber-400">仅显示前 400 行</Text>
+          <Text class="text-[10px] text-warning">仅显示前 400 行</Text>
         </View>
       ) : activeFile()?.truncated ? (
         <View class="border-t border-border px-2 py-1">
-          <Text class="text-[10px] text-amber-400">文件较大，内容已截断</Text>
+          <Text class="text-[10px] text-warning">文件较大，内容已截断</Text>
         </View>
       ) : null}
     </View>

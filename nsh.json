@@ -13,15 +13,6 @@
     "radius": {
       "card": 12,
       "panel": 10
-    },
-    "colors": {
-      "surface": "#181816",
-      "surface-raised": "#20201c",
-      "code": "#171714",
-      "code-foreground": "#d8d4cb",
-      "success": "#56b46a",
-      "warning": "#d6a33f",
-      "info": "#6aa9f5"
     }
   },
   "capabilities": {

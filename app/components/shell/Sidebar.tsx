@@ -44,7 +44,7 @@ export function Sidebar() {
         <Button
           onPress={() => void actions.newSession()}
           disabled={phase() !== "ready" || busy()}
-          class="w-full flex-row items-center gap-2 rounded-md border border-sidebar-border bg-[#181816] px-2.5 py-2 transition-colors hover:bg-sidebar-accent active:bg-sidebar-accent disabled:opacity-50"
+          class="w-full flex-row items-center gap-2 rounded-md border border-sidebar-border bg-surface px-2.5 py-2 transition-colors hover:bg-sidebar-accent active:bg-sidebar-accent disabled:opacity-50"
         >
           <Glyph symbol="＋" size={12} class="text-primary" />
           <Text class="text-[12px] font-medium text-sidebar-foreground">新建会话</Text>
@@ -89,7 +89,7 @@ export function Sidebar() {
         </View>
       </View>
 
-      <View class="mx-2.5 mb-2 flex-col gap-1 rounded-lg border border-sidebar-border bg-[#181816] p-2">
+      <View class="mx-2.5 mb-2 flex-col gap-1 rounded-lg border border-sidebar-border bg-surface p-2">
         <View class="flex-row items-center gap-1.5">
           <Glyph symbol="▤" size={11} />
           <Text class="flex-1 truncate text-[11px] font-medium text-sidebar-foreground">

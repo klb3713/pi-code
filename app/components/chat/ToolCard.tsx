@@ -92,7 +92,7 @@ export function ToolCard(props: ToolCardProps) {
           </View>
         ) : (
           <View class="flex-row items-center gap-1">
-            <Text class="text-[11px] text-green-400">✓</Text>
+            <Text class="text-[11px] text-success">✓</Text>
             <Text class="text-[10px] text-muted-foreground">{formatDuration(run()?.durationMs)}</Text>
           </View>
         )}
@@ -102,9 +102,9 @@ export function ToolCard(props: ToolCardProps) {
       <If when={open()}>
         <View class="flex-col gap-2 border-t border-border px-3 py-2">
           <If when={preview().length > 0}>
-            <View class="flex-col gap-1 rounded-md bg-[#171714] px-2.5 py-2">
+            <View class="flex-col gap-1 rounded-md bg-code px-2.5 py-2">
               <Text class="text-[10px] text-muted-foreground">内容预览</Text>
-              <Text class="font-mono text-[11px] text-[#d8d4cb]" style={{ lineHeight: 16 }}>
+              <Text class="font-mono text-[11px] text-code-foreground" style={{ lineHeight: 16 }}>
                 {preview()}
               </Text>
             </View>
@@ -131,7 +131,7 @@ export function ToolCard(props: ToolCardProps) {
         {(value) => (
           <View class="flex-row items-center gap-2 border-t border-border px-3 py-1.5">
             <Text class="text-[10px] text-muted-foreground">变更</Text>
-            <Text class="font-mono text-[10px] text-green-400">+{value().additions}</Text>
+            <Text class="font-mono text-[10px] text-success">+{value().additions}</Text>
             <Text class="font-mono text-[10px] text-destructive">−{value().deletions}</Text>
           </View>
         )}

@@ -36,14 +36,14 @@ export function Composer() {
         <View class="flex-row items-center gap-1.5 px-2.5 pb-2 pt-1">
           <Button
             onPress={() => settingsOpen.set(true)}
-            class="flex-row items-center gap-1 rounded-full border border-border bg-[#181816] px-2 py-1 transition-colors hover:bg-accent active:bg-accent"
+            class="flex-row items-center gap-1 rounded-full border border-border bg-surface px-2 py-1 transition-colors hover:bg-accent active:bg-accent"
           >
             <Glyph symbol="◌" size={9} />
             <Text class="text-[10px] text-muted-foreground">{model()?.name ?? "选择模型"}</Text>
           </Button>
           <Button
             onPress={() => settingsOpen.set(true)}
-            class="flex-row items-center gap-1 rounded-full border border-border bg-[#181816] px-2 py-1 transition-colors hover:bg-accent active:bg-accent"
+            class="flex-row items-center gap-1 rounded-full border border-border bg-surface px-2 py-1 transition-colors hover:bg-accent active:bg-accent"
           >
             <Glyph symbol="⚙" size={9} />
             <Text class="text-[10px] text-muted-foreground">thinking {thinking()}</Text>
@@ -53,7 +53,7 @@ export function Composer() {
             <Button
               onPress={() => void actions.stop()}
               accessibilityLabel="停止生成"
-              class="h-8 w-8 items-center justify-center rounded-full border border-border bg-[#181816] transition-colors hover:bg-accent active:bg-accent"
+              class="h-8 w-8 items-center justify-center rounded-full border border-border bg-surface transition-colors hover:bg-accent active:bg-accent"
             >
               <Glyph symbol="■" size={10} class="text-destructive" />
             </Button>

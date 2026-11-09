@@ -74,7 +74,7 @@ function AssistantBlocks(props: { content: UiContent[]; streaming?: boolean }) {
             selectable
             class="text-[13px] text-foreground"
             styles={{ root: { fontSize: 13, lineHeight: 21 }, codeBlockCode: { fontSize: 11.5, lineHeight: 17 } }}
-            classes={{ codeBlock: "rounded-md border border-border bg-[#171714]" }}
+            classes={{ codeBlock: "rounded-md border border-border bg-code" }}
           />
         );
       }}

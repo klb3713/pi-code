@@ -45,7 +45,7 @@ export function Welcome() {
             <Button
               disabled={disabled()}
               onPress={() => void actions.send(item().title)}
-              class="w-full flex-row items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary hover:bg-[#20201c] active:bg-[#20201c] disabled:opacity-50"
+              class="w-full flex-row items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary hover:bg-surface-raised active:bg-surface-raised disabled:opacity-50"
             >
               <View class="h-7 w-7 items-center justify-center rounded-md bg-secondary">
                 <Glyph symbol={item().icon} size={12} class="text-primary" />

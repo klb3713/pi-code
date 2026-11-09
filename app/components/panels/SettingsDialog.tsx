@@ -1,13 +1,19 @@
-// 设置对话框：工作区、运行模式、模型与 thinking 级别。
+// 设置对话框：工作区、运行模式、外观、模型与 thinking 级别。
 import { computed, Text, View } from "nsh";
 import { Button, Dialog, Input, Select, type SelectItem } from "nsh/base";
-import type { RunMode, ThinkingLevel } from "../../protocol";
+import type { RunMode, ThemePreference, ThinkingLevel } from "../../protocol";
 import { actions, bootError, models, settings, settingsError, settingsOpen, settingsSaving } from "../../store";
 
 const MODE_ITEMS: SelectItem[] = [
   { value: "auto", title: "自动" },
   { value: "demo", title: "演示" },
   { value: "real", title: "真实" },
+];
+
+const THEME_ITEMS: SelectItem[] = [
+  { value: "dark", title: "深色" },
+  { value: "light", title: "浅色" },
+  { value: "system", title: "跟随系统" },
 ];
 
 const THINKING_ITEMS: SelectItem[] = [
@@ -42,7 +48,7 @@ function FieldSelect(props: {
         popupClass="rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
         itemClass="rounded px-2 py-1.5 text-[12px] text-popover-foreground focus:bg-accent focus:text-accent-foreground selected:font-medium"
         trigger={
-          <View class="h-8 flex-row items-center justify-between rounded-md border border-border bg-[#181816] px-2.5 transition-colors hover:bg-accent active:bg-accent disabled:opacity-50">
+          <View class="h-8 flex-row items-center justify-between rounded-md border border-border bg-surface px-2.5 transition-colors hover:bg-accent active:bg-accent disabled:opacity-50">
             <Text class="truncate text-[12px] text-foreground">{props.title}</Text>
             <Text class="text-[10px] text-muted-foreground">▾</Text>
           </View>
@@ -62,6 +68,9 @@ export function SettingsDialog() {
     return found?.name ?? (key || "使用默认模型");
   });
   const modeTitle = computed(() => MODE_ITEMS.find((item) => item.value === settings().mode)?.title ?? "自动");
+  const themeTitle = computed(
+    () => THEME_ITEMS.find((item) => item.value === settings().theme)?.title ?? "深色",
+  );
   const thinkingTitle = computed(
     () => THINKING_ITEMS.find((item) => item.value === settings().thinking)?.title ?? settings().thinking,
   );
@@ -85,7 +94,7 @@ export function SettingsDialog() {
           value={settings().workspace}
           onChange={({ value }) => settings.update((current) => ({ ...current, workspace: value }))}
           placeholder="选择或输入工作区路径"
-          class="h-8 rounded-md border border-border bg-[#181816] px-2.5 font-mono text-[12px] text-foreground"
+          class="h-8 rounded-md border border-border bg-surface px-2.5 font-mono text-[12px] text-foreground"
         />
       </View>
 
@@ -102,7 +111,20 @@ export function SettingsDialog() {
         }}
       />
 
-      <View class="flex-col gap-2 rounded-md border border-border bg-[#181816] p-2.5">
+      <FieldSelect
+        label="外观"
+        value={settings().theme}
+        title={themeTitle()}
+        items={THEME_ITEMS}
+        onChange={(value) => {
+          if (value === "dark" || value === "light" || value === "system") {
+            const theme: ThemePreference = value;
+            settings.update((current) => ({ ...current, theme }));
+          }
+        }}
+      />
+
+      <View class="flex-col gap-2 rounded-md border border-border bg-surface p-2.5">
         <View class="flex-col gap-0.5">
           <Text class="text-[12px] font-medium text-card-foreground">自定义 OpenAI 兼容网关</Text>
           <Text class="text-[10px] text-muted-foreground">留空地址则使用 pi 原生 provider；密钥可以留空。</Text>
@@ -159,19 +181,22 @@ export function SettingsDialog() {
         <Text class="text-[10px] text-destructive">{settingsError() || bootError()}</Text>
       ) : null}
 
-      <View class="flex-col gap-1 rounded-md border border-border bg-[#181816] p-2.5">
+      <View class="flex-col gap-1 rounded-md border border-border bg-surface p-2.5">
         <Text class="text-[10px] text-muted-foreground">
           自动 / 真实模式下，保存新网关会立即重连并请求 /models；再从「默认模型」选择并保存即可持久化。
         </Text>
         <Text class="text-[10px] text-muted-foreground">
-          全部设置保存在 ~/.pi-code/config.json。Demo 使用本地模拟模型，但 pi agent loop 与工具仍真实执行。
+          外观（深色 / 浅色 / 跟随系统）保存后立即生效，无需重连；全部设置保存在 ~/.pi-code/config.json。
+        </Text>
+        <Text class="text-[10px] text-muted-foreground">
+          Demo 使用本地模拟模型，但 pi agent loop 与工具仍真实执行。
         </Text>
       </View>
 
       <View class="flex-row items-center justify-end gap-2 pt-1">
         <Button
           onPress={() => settingsOpen.set(false)}
-          class="rounded-md border border-border bg-[#181816] px-3 py-1.5 transition-colors hover:bg-accent active:bg-accent"
+          class="rounded-md border border-border bg-surface px-3 py-1.5 transition-colors hover:bg-accent active:bg-accent"
         >
           <Text class="text-[12px] text-foreground">取消</Text>
         </Button>

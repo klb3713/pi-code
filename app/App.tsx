@@ -42,7 +42,7 @@ function ToastHost() {
     current.tone === "error"
       ? "border-destructive/40 bg-destructive/15 text-destructive"
       : current.tone === "success"
-        ? "border-green-400/40 bg-green-400/15 text-green-400"
+        ? "border-success/40 bg-success/15 text-success"
         : "border-border bg-popover text-popover-foreground";
   return (
     <View class="absolute left-0 right-0 top-14 items-center" style={{ pointerEvents: "none" }}>

@@ -9,9 +9,11 @@ import test from "node:test";
 
 import {
   configFilePath,
+  DEFAULT_THEME,
   loadConfig,
   loadOrMigrateConfig,
   normalizeAppConfig,
+  normalizeTheme,
   parseModelKey,
   saveConfig,
 } from "./config.mjs";
@@ -28,28 +30,47 @@ function appConfig(workspace) {
     mode: "auto",
     modelKey: "",
     thinking: "off",
+    theme: "dark",
     gateway: { baseUrl: "", apiKey: "" },
   };
 }
 
-test("normalizes workspace, gateway URL, model key and thinking", async (t) => {
+test("normalizes workspace, gateway URL, model key, thinking and theme", async (t) => {
   const root = await temporaryDirectory(t);
   const config = normalizeAppConfig({
     workspace: ` ${path.join(root, "workspace", "..", "workspace")} `,
     mode: " real ",
     modelKey: " openai-gateway / org/model-with/slashes ",
     thinking: " high ",
+    theme: " light ",
     gateway: { baseUrl: " https://gateway.example/v1/// ", apiKey: " secret-key " },
   });
   assert.equal(config.workspace, path.join(root, "workspace"));
   assert.equal(config.mode, "real");
   assert.equal(config.modelKey, "openai-gateway/org/model-with/slashes");
   assert.equal(config.thinking, "high");
+  assert.equal(config.theme, "light");
   assert.deepEqual(config.gateway, { baseUrl: "https://gateway.example/v1", apiKey: "secret-key" });
   assert.deepEqual(parseModelKey(config.modelKey), {
     provider: "openai-gateway",
     modelId: "org/model-with/slashes",
   });
+});
+
+test("theme defaults to dark for missing values and rejects unknown appearances", async (t) => {
+  const root = await temporaryDirectory(t);
+  // A config file written before the appearance setting existed keeps dark.
+  const { theme: _legacyTheme, ...legacyWithoutTheme } = appConfig(root);
+  assert.equal(normalizeAppConfig(legacyWithoutTheme).theme, "dark");
+  assert.equal(normalizeTheme(undefined), "dark");
+  assert.equal(normalizeTheme(null), "dark");
+  assert.equal(normalizeTheme(undefined), DEFAULT_THEME);
+  for (const theme of [" dark ", "light", "system"]) {
+    assert.equal(normalizeTheme(theme), theme.trim());
+  }
+  for (const invalid of ["LIGHT", "auto", 42]) {
+    assert.throws(() => normalizeTheme(invalid), /无效的外观设置/);
+  }
 });
 
 test("rejects invalid enum, model key and gateway values", async (t) => {
@@ -84,18 +105,24 @@ test("saveConfig atomically rewrites config.json with private permissions", asyn
       ...appConfig(root),
       mode: "real",
       modelKey: "openai-gateway/test-model",
+      theme: "light",
       gateway: { baseUrl: "http://127.0.0.1:8080/v1/", apiKey: "local-secret" },
     },
     { env },
   );
   const stat = await fs.stat(filePath);
   assert.equal(stat.mode & 0o777, 0o600);
+  assert.equal(first.theme, "light");
   assert.deepEqual(await loadConfig({ env }), first);
+  assert.equal((await loadConfig({ env })).theme, "light");
+  assert.ok((await fs.readFile(filePath, "utf8")).includes('"theme": "light"'));
   assert.equal((await fs.readdir(path.dirname(filePath))).length, 1, "temporary files must be cleaned up");
 
-  const second = await saveConfig({ ...first, thinking: "low" }, { env });
+  const second = await saveConfig({ ...first, thinking: "low", theme: "system" }, { env });
   assert.equal(second.thinking, "low");
+  assert.equal(second.theme, "system");
   assert.deepEqual(await loadConfig({ env }), second);
+  assert.equal((await loadConfig({ env })).theme, "system");
   assert.deepEqual(await fs.readdir(path.dirname(filePath)), ["config.json"]);
   assert.ok((await fs.readFile(filePath, "utf8")).endsWith("\n"));
 });
@@ -127,6 +154,7 @@ test("first init migrates legacy config and OPENAI_* defaults once", async (t) =
     mode: "real",
     modelKey: "openai-gateway/environment-model",
     thinking: "medium",
+    theme: "dark",
     gateway: { baseUrl: "http://127.0.0.1:9000/v1", apiKey: "environment-secret" },
   });
 
@@ -151,6 +179,41 @@ test("first init migrates legacy config and OPENAI_* defaults once", async (t) =
   assert.equal(reconnect.created, false);
   assert.deepEqual(reconnect.config, migrated.config);
   assert.deepEqual(await loadConfig({ env }), migrated.config);
+});
+
+test("first init preserves a legacy light appearance", async (t) => {
+  const root = await temporaryDirectory(t);
+  const env = { PI_CODE_CONFIG_DIR: path.join(root, "config") };
+  const migrated = await loadOrMigrateConfig(
+    { workspace: root, mode: "demo", config: { ...appConfig(root), theme: "light" } },
+    { env },
+  );
+  assert.equal(migrated.created, true);
+  assert.equal(migrated.config.theme, "light");
+  assert.equal((await loadConfig({ env })).theme, "light");
+
+  // Once the file exists it wins, including over a stale request theme.
+  const reconnect = await loadOrMigrateConfig(
+    { workspace: root, mode: "demo", config: { ...appConfig(root), theme: "dark" } },
+    { env },
+  );
+  assert.equal(reconnect.created, false);
+  assert.equal(reconnect.config.theme, "light");
+});
+
+test("an invalid appearance in config.json is reported without rewriting it", async (t) => {
+  const root = await temporaryDirectory(t);
+  const env = { PI_CODE_CONFIG_DIR: path.join(root, "config") };
+  const filePath = configFilePath(env);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const invalid = `${JSON.stringify({ ...appConfig(root), theme: "auto" }, null, 2)}\n`;
+  await fs.writeFile(filePath, invalid, "utf8");
+  await assert.rejects(() => loadConfig({ env }), /无效的外观设置/);
+  await assert.rejects(
+    () => loadOrMigrateConfig({ workspace: root, mode: "demo", config: appConfig(root) }, { env }),
+    /无效的外观设置/,
+  );
+  assert.equal(await fs.readFile(filePath, "utf8"), invalid);
 });
 
 test("an explicitly configured gateway does not inherit another gateway's key", async (t) => {

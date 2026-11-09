@@ -4,6 +4,7 @@
 // setTransport() and events are pushed straight into applyEvent(), exercising
 // the same reducer the bridge client feeds in production.
 import { beforeEach, expect, test } from "nsh/test";
+import { colorScheme, setColorScheme } from "nsh";
 import {
   actions,
   activeAssistant,
@@ -30,7 +31,7 @@ import {
   usage,
   workspace,
 } from "../app/store";
-import { emptyUsage, type UsageInfo } from "../app/protocol";
+import { emptyUsage, type AppConfig, type UsageInfo } from "../app/protocol";
 import { createFakeTransport } from "./fake-transport";
 
 const SAMPLE_USAGE: UsageInfo = {
@@ -44,6 +45,7 @@ const SAMPLE_USAGE: UsageInfo = {
 
 function resetStore(): void {
   setTransport(createFakeTransport());
+  setColorScheme("dark");
   phase.set("ready");
   connection.set("connected");
   bootError.set("");
@@ -61,6 +63,7 @@ function resetStore(): void {
     ...current,
     modelKey: "",
     thinking: "off",
+    theme: "dark",
     gateway: { baseUrl: "", apiKey: "" },
   }));
 }
@@ -71,6 +74,33 @@ function textOf(value: unknown): string {
     .filter((block) => (block as { type?: string }).type === "text")
     .map((block) => (block as { text?: string }).text ?? "")
     .join("\n");
+}
+
+/** Applies a ready event for a settled demo runtime, as the bridge would. */
+function applyReadyConfig(theme: AppConfig["theme"] = "dark"): void {
+  applyEvent({
+    type: "ready",
+    data: {
+      workspace: "/tmp/pi-code-demo",
+      mode: "demo",
+      demo: true,
+      piVersion: "1.5.0",
+      models: [
+        { provider: "pi-demo", id: "pi-demo-1", name: "Pi Demo 1" },
+        { provider: "pi-demo", id: "pi-demo-2", name: "Pi Demo 2" },
+      ],
+      currentModel: { provider: "pi-demo", id: "pi-demo-1", name: "Pi Demo 1" },
+      thinkingLevel: "off",
+      config: {
+        workspace: "/tmp/pi-code-demo",
+        mode: "demo",
+        modelKey: "pi-demo/pi-demo-1",
+        thinking: "off",
+        theme,
+        gateway: { baseUrl: "", apiKey: "" },
+      },
+    },
+  });
 }
 
 beforeEach(() => {
@@ -297,6 +327,7 @@ test("ready event fills connection, models, workspace and settings", () => {
         mode: "demo",
         modelKey: "pi-demo/pi-demo-1",
         thinking: "medium",
+        theme: "light",
         gateway: { baseUrl: "", apiKey: "" },
       },
     },
@@ -308,6 +339,9 @@ test("ready event fills connection, models, workspace and settings", () => {
   expect(models().length).toBe(1);
   expect(model()?.name).toBe("Demo 模型");
   expect(thinking()).toBe("medium");
+  // The saved appearance is adopted and applied by the store.
+  expect(settings().theme).toBe("light");
+  expect(colorScheme()).toBe("light");
 });
 
 test("unknown events are ignored safely", () => {
@@ -383,6 +417,7 @@ test("applySettings applies a model change without reconnecting", async () => {
         mode: "demo",
         modelKey: "pi-demo/pi-demo-1",
         thinking: "off",
+        theme: "dark",
         gateway: { baseUrl: "", apiKey: "" },
       },
     },
@@ -392,6 +427,70 @@ test("applySettings applies a model change without reconnecting", async () => {
   expect(transport.calls.some((call) => call.type === "set_model")).toBe(true);
   expect(transport.calls.some((call) => call.type === "reconnect")).toBe(false);
   expect(model()?.id).toBe("pi-demo-2");
+});
+
+test("applySettings persists the appearance without reconnecting", async () => {
+  const transport = createFakeTransport();
+  setTransport(transport);
+  applyReadyConfig("dark");
+  settingsOpen.set(true);
+  settings.update((current) => ({ ...current, theme: "light" }));
+
+  await actions.applySettings();
+
+  const save = transport.calls.find((call) => call.type === "save_config");
+  expect(save).toBeDefined();
+  expect((save?.payload.config as AppConfig).theme).toBe("light");
+  expect(colorScheme()).toBe("light");
+  expect(settings().theme).toBe("light");
+  expect(transport.calls.some((call) => call.type === "reconnect")).toBe(false);
+  expect(settingsOpen()).toBe(false);
+  expect(settingsError()).toBe("");
+});
+
+test("applySettings reverts the appearance when saving fails", async () => {
+  const transport = createFakeTransport();
+  const request = transport.request.bind(transport);
+  transport.request = (type, payload = {}, timeoutMs) => {
+    if (type === "save_config") {
+      return Promise.resolve({
+        id: "failed-save",
+        type: "response",
+        command: type,
+        success: false,
+        error: "disk is read-only",
+      });
+    }
+    return request(type, payload, timeoutMs);
+  };
+  setTransport(transport);
+  applyReadyConfig("dark");
+  expect(colorScheme()).toBe("dark");
+  settingsOpen.set(true);
+  settings.update((current) => ({ ...current, theme: "light" }));
+
+  await actions.applySettings();
+
+  // The save never landed, so the app keeps the appearance it started with.
+  expect(colorScheme()).toBe("dark");
+  expect(settingsError()).toBe("disk is read-only");
+  expect(settingsOpen()).toBe(true);
+  expect(settingsSaving()).toBe(false);
+});
+
+test("applySettings applies the system appearance", async () => {
+  const transport = createFakeTransport();
+  setTransport(transport);
+  applyReadyConfig("dark");
+  settingsOpen.set(true);
+  settings.update((current) => ({ ...current, theme: "system" }));
+
+  await actions.applySettings();
+
+  // Headless apps run with the system's default (light) appearance.
+  expect(colorScheme()).toBe("light");
+  expect(settings().theme).toBe("system");
+  expect(settingsOpen()).toBe(false);
 });
 
 test("applySettings persists a custom gateway and reconnects without restarting the app", async () => {
@@ -412,6 +511,7 @@ test("applySettings persists a custom gateway and reconnects without restarting 
         mode: "demo",
         modelKey: "pi-demo/pi-demo-1",
         thinking: "off",
+        theme: "dark",
         gateway: { baseUrl: "", apiKey: "" },
       },
     },
@@ -482,6 +582,7 @@ test("applySettings warns when a saved gateway falls back to Demo", async () => 
         mode: "demo",
         modelKey: "pi-demo/pi-demo-1",
         thinking: "off",
+        theme: "dark",
         gateway: { baseUrl: "", apiKey: "" },
       },
     },

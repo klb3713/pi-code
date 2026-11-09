@@ -72,6 +72,11 @@
 - [x] 修复嵌套工作区（git 子目录）下 `git_status` 路径为仓库根相对的问题。
 - [x] Bridge 自测 13/13、`nsh test` 19/19（headless 与 `--target macos`）、网关实测通过。
 
+### Phase 6.2 · 外观主题（深色 / 浅色 / 跟随系统）
+- [x] 深色 / 浅色 / 跟随系统主题切换：`AppConfig.theme` 持久化，设置窗口新增「外观」选择器。
+- [x] `theme.json` 补齐 Claude Code 风格浅色调色板（象牙白 #faf9f5、石板墨 #141413、暖灰边框 #e8e6dc、clay #c6613f）。
+- [x] 移除 `nsh.json` 中写死的深色 surface / code / success / warning / info，统一使用 theme.json 自适应 tokens。
+
 ### Phase 6 · 交付
 - [x] README（功能、架构、启动、路线图、限制）。
 - [x] `docs/SPEC.md`（协议与视觉规范）。

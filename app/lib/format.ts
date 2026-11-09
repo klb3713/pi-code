@@ -117,31 +117,31 @@ export function fileBadge(path: string): { text: string; className: string } {
   switch (extension) {
     case "ts":
     case "tsx":
-      return { text: "TS", className: "text-[#4f9cf7]" };
+      return { text: "TS", className: "text-[#3f6f9c] dark:text-[#4f9cf7]" };
     case "js":
     case "jsx":
     case "mjs":
     case "cjs":
-      return { text: "JS", className: "text-[#e5c07b]" };
+      return { text: "JS", className: "text-[#8a6320] dark:text-[#e5c07b]" };
     case "json":
-      return { text: "{}", className: "text-[#d6a33f]" };
+      return { text: "{}", className: "text-warning" };
     case "md":
     case "mdx":
-      return { text: "MD", className: "text-[#9b978d]" };
+      return { text: "MD", className: "text-muted-foreground" };
     case "css":
     case "scss":
-      return { text: "CS", className: "text-[#c678dd]" };
+      return { text: "CS", className: "text-[#7b5ea7] dark:text-[#c678dd]" };
     case "rs":
-      return { text: "RS", className: "text-[#e07b53]" };
+      return { text: "RS", className: "text-[#b5542f] dark:text-[#e07b53]" };
     case "py":
-      return { text: "PY", className: "text-[#6aa9f5]" };
+      return { text: "PY", className: "text-info" };
     case "sh":
     case "bash":
     case "zsh":
-      return { text: "SH", className: "text-[#56b46a]" };
+      return { text: "SH", className: "text-success" };
     case "yml":
     case "yaml":
-      return { text: "YML", className: "text-[#d6a33f]" };
+      return { text: "YML", className: "text-warning" };
     default:
       return { text: extension ? extension.slice(0, 3).toUpperCase() : "·", className: "text-muted-foreground" };
   }
@@ -156,13 +156,13 @@ export function statusLetter(status: string): string {
 export function statusColor(status: string): string {
   switch (statusLetter(status)) {
     case "A":
-      return "text-green-400";
+      return "text-success";
     case "D":
       return "text-destructive";
     case "R":
-      return "text-blue-400";
+      return "text-info";
     default:
-      return "text-amber-400";
+      return "text-warning";
   }
 }
 

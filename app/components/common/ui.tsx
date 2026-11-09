@@ -63,8 +63,8 @@ export function Spinner(props: { size?: number }) {
 export function StatusDot(props: { tone?: "success" | "warning" | "error" | "muted" | "primary"; size?: number }) {
   const size = props.size ?? 6;
   const colors: Record<string, string> = {
-    success: "bg-green-400",
-    warning: "bg-amber-400",
+    success: "bg-success",
+    warning: "bg-warning",
     error: "bg-destructive",
     muted: "bg-muted-foreground",
     primary: "bg-primary",
@@ -76,10 +76,10 @@ export function Tag(props: { text: string; tone?: "default" | "primary" | "succe
   const tones: Record<string, string> = {
     default: "bg-secondary text-secondary-foreground",
     primary: "bg-primary/15 text-primary",
-    success: "bg-green-400/15 text-green-400",
-    warning: "bg-amber-400/15 text-amber-400",
+    success: "bg-success/15 text-success",
+    warning: "bg-warning/15 text-warning",
     error: "bg-destructive/15 text-destructive",
-    info: "bg-blue-400/15 text-blue-400",
+    info: "bg-info/15 text-info",
   };
   return (
     <View class={`rounded-full px-1.5 py-0.5 ${tones[props.tone ?? "default"]} ${props.class ?? ""}`}>

@@ -7,8 +7,8 @@ import { expect, open, test, type App } from "nsh/test";
 
 const VIEWPORT = { platform: "macos", width: 1440, height: 900 } as const;
 
-async function openApp(): Promise<App> {
-  const app = await open("../tests/test-entry.tsx", VIEWPORT);
+async function openApp(options: { colorScheme?: "dark" | "light" } = {}): Promise<App> {
+  const app = await open("../test-entry.tsx", { ...VIEWPORT, ...options });
   await app.waitFor("text:pi 已连接", { timeout: 20000 });
   await app.waitFor("text:今天想构建什么？", { timeout: 20000 });
   return app;
@@ -107,6 +107,8 @@ test("设置弹窗：打开、字段齐全并取消关闭", async () => {
   await app.press("text:设置");
   await app.waitFor("text:运行模式", { timeout: 10000 });
   expect(app.texts()).toContain("工作区");
+  expect(app.texts()).toContain("外观");
+  expect(app.texts()).toContain("深色");
   expect(app.texts()).toContain("自定义 OpenAI 兼容网关");
   expect(app.texts()).toContain("Base URL");
   expect(app.texts()).toContain("API Key");
@@ -120,4 +122,37 @@ test("设置弹窗：打开、字段齐全并取消关闭", async () => {
   await app.press("text:取消");
   await app.waitFor("text:运行模式", { state: "gone", timeout: 10000 });
   await app.waitFor("text:今天想构建什么？", { timeout: 10000 });
+}, 60000);
+
+test("外观：深色 → 浅色 → 深色 保存后立即生效并持久化", async () => {
+  const app = await openApp({ colorScheme: "dark" });
+  const welcome = "text:今天想构建什么？";
+  // The Claude Code dark palette draws the welcome title in warm off-white.
+  expect(app.spanStyle(welcome).color).toBe("#edeae4ff");
+
+  await app.press("text:设置");
+  await app.waitFor("text:外观", { timeout: 10000 });
+  await app.waitFor("text:深色", { timeout: 10000 });
+
+  // Pick 浅色 in the 外观 select, then save: no reconnect, appearance applies.
+  await app.press("text:深色");
+  await app.press("text:浅色");
+  await app.press("text:保存");
+  await app.waitFor("text:外观", { state: "gone", timeout: 10000 });
+  await app.waitFor(welcome, { timeout: 10000 });
+
+  // The light palette draws the same title in slate ink, and the choice is cached.
+  expect(app.spanStyle(welcome).color).toBe("#141413ff");
+  await app.waitUntil(() => app.storage()["pi-code.theme"] === "light", { timeout: 10000 });
+
+  // Switch back: the trigger now reads 浅色, so 深色 is only in the popup.
+  await app.press("text:设置");
+  await app.waitFor("text:外观", { timeout: 10000 });
+  await app.press("text:浅色");
+  await app.press("text:深色");
+  await app.press("text:保存");
+  await app.waitFor("text:外观", { state: "gone", timeout: 10000 });
+  await app.waitFor(welcome, { timeout: 10000 });
+  expect(app.spanStyle(welcome).color).toBe("#edeae4ff");
+  await app.waitUntil(() => app.storage()["pi-code.theme"] === "dark", { timeout: 10000 });
 }, 60000);

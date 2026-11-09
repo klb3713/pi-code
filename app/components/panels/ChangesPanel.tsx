@@ -37,7 +37,7 @@ export function ChangesPanel() {
                   </View>
                   {item().additions !== undefined || item().deletions !== undefined ? (
                     <View class="flex-row items-center gap-1.5">
-                      <Text class="font-mono text-[10px] text-green-400">+{item().additions ?? 0}</Text>
+                      <Text class="font-mono text-[10px] text-success">+{item().additions ?? 0}</Text>
                       <Text class="font-mono text-[10px] text-destructive">−{item().deletions ?? 0}</Text>
                     </View>
                   ) : null}
